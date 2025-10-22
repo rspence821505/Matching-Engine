@@ -8,17 +8,24 @@
 struct Order {
   int id;
   Side side;
-  double price;
+  OrderType type; // LIMIT or MARKET
+  double price;   // For Limit orders (infinity for market)
   int quantity;
   int remaining_qty;
   TimePoint timestamp;
   OrderState state;
 
+  // Constructor for LIMIT orders
   Order(int id_, Side side_, double price_, int qty_);
+
+  // Constructor for MARKET orders
+  Order(int id_, Side side_, OrderType type_, int qty_);
 
   bool is_filled() const;
   bool is_active() const;
+  bool is_market_order() const;
   std::string side_to_string() const;
+  std::string type_to_string() const;
   std::string state_to_string() const;
 
   friend std::ostream &operator<<(std::ostream &os, const Order &o);

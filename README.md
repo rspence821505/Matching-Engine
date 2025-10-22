@@ -111,9 +111,9 @@ Typical performance on modern hardware:
 
 ## Future Enhancements
 
-- [ ] Order cancellation and amendment
 - [ ] Market orders
 - [ ] Time-in-force rules (IOC, FOK, GTC)
+- [ ] Trade Replay
 - [ ] Multi-threaded order processing
 - [ ] Persistent order storage
 - [ ] Network interface (FIX protocol)

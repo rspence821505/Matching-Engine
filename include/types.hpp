@@ -10,8 +10,14 @@ using TimePoint = std::chrono::time_point<Clock>;
 // Order side of book
 enum class Side { BUY, SELL };
 
-// Order type
+// Order operations
 enum class Type { NEW, CANCEL, AMEND };
+
+// Order Type
+enum class OrderType {
+  LIMIT,  // limit order (has price limit)
+  MARKET, // Market order ( no price limit)
+};
 
 // Order States to track order lifecycle
 enum class OrderState {

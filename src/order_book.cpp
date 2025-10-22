@@ -120,7 +120,9 @@ void OrderBook::match_buy_order(Order &buy_order) {
   while (buy_order.remaining_qty > 0 && !asks_.empty()) {
     Order best_ask = asks_.top();
 
-    if (buy_order.price >= best_ask.price) {
+    // Market orders always match (no price check)
+    // Limit orders need price check
+    if (buy_order.is_market_order() || buy_order.price >= best_ask.price) {
       int trade_qty = std::min(buy_order.remaining_qty, best_ask.remaining_qty);
       double trade_price = best_ask.price;
 
@@ -156,12 +158,23 @@ void OrderBook::match_buy_order(Order &buy_order) {
         }
       }
     } else {
-      break;
+      break; // Limit order can't match, stop
     }
   }
 
-  if (buy_order.remaining_qty > 0) {
+  // Market orders DON'T rest in book, only limit orders do
+  if (buy_order.remaining_qty > 0 && !buy_order.is_market_order()) {
     bids_.push(buy_order);
+  } else if (buy_order.remaining_qty > 0 && buy_order.is_market_order()) {
+    // Market order had unfilled quantity - mark as cancelled
+    auto it = active_orders_.find(buy_order.id);
+    if (it != active_orders_.end()) {
+      it->second.state = OrderState::CANCELLED;
+      std::cout << "Market order " << buy_order.id << " partially filled ("
+                << (buy_order.quantity - buy_order.remaining_qty) << "/"
+                << buy_order.quantity << "), remaining cancelled (no liquidity)"
+                << std::endl;
+    }
   }
 }
 
@@ -169,7 +182,9 @@ void OrderBook::match_sell_order(Order &sell_order) {
   while (sell_order.remaining_qty > 0 && !bids_.empty()) {
     Order best_bid = bids_.top();
 
-    if (sell_order.price <= best_bid.price) {
+    // Market orders always match (no price check)
+    // Limit orders need price check
+    if (sell_order.is_market_order() || sell_order.price <= best_bid.price) {
       int trade_qty =
           std::min(sell_order.remaining_qty, best_bid.remaining_qty);
       double trade_price = best_bid.price;
@@ -185,7 +200,7 @@ void OrderBook::match_sell_order(Order &sell_order) {
         bids_.push(best_bid);
       }
 
-      // ✅ NEW: Update both orders in active_orders_
+      // Update both orders in active_orders_
       auto sell_it = active_orders_.find(sell_order.id);
       if (sell_it != active_orders_.end()) {
         sell_it->second.remaining_qty = sell_order.remaining_qty;
@@ -206,12 +221,23 @@ void OrderBook::match_sell_order(Order &sell_order) {
         }
       }
     } else {
-      break;
+      break; // Limit order can't match, stop
     }
   }
 
-  if (sell_order.remaining_qty > 0) {
+  // Market orders DON'T rest in book, only limit orders do
+  if (sell_order.remaining_qty > 0 && !sell_order.is_market_order()) {
     asks_.push(sell_order);
+  } else if (sell_order.remaining_qty > 0 && sell_order.is_market_order()) {
+    // Market order had unfilled quantity - mark as cancelled
+    auto it = active_orders_.find(sell_order.id);
+    if (it != active_orders_.end()) {
+      it->second.state = OrderState::CANCELLED;
+      std::cout << "Market order " << sell_order.id << " partially filled ("
+                << (sell_order.quantity - sell_order.remaining_qty) << "/"
+                << sell_order.quantity
+                << "), remaining cancelled (no liquidity)" << std::endl;
+    }
   }
 }
 
