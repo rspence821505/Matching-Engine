@@ -8,11 +8,14 @@
 struct Order {
   int id;
   Side side;
-  OrderType type;  // LIMIT or MARKET
-  TimeInForce tif; // Time-in-Force
-  double price;    // For Limit orders (infinity for market)
-  int quantity;
-  int remaining_qty;
+  OrderType type;    // LIMIT or MARKET
+  TimeInForce tif;   // Time-in-Force
+  double price;      // For Limit orders (infinity for market)
+  int quantity;      // Total original quantity
+  int remaining_qty; // Total remaining (visible + hidden)
+  int display_qty;   // Currently visible quantity
+  int hidden_qty;    // Hidden reserve quantity
+  int peak_size;     // How much to reveal at refresh
   TimePoint timestamp;
   OrderState state;
 
@@ -24,10 +27,18 @@ struct Order {
   Order(int id_, Side side_, OrderType type_, int qty_,
         TimeInForce tif_ = TimeInForce::IOC);
 
+  // Constructor for ICEBERG orders
+  Order(int id_, Side side_, double price_, int total_qty, int peak_size_,
+        TimeInForce tif_ = TimeInForce::GTC);
+
   bool is_filled() const;
   bool is_active() const;
   bool is_market_order() const;
+  bool is_iceberg() const;
   bool can_rest_in_book() const;
+  bool needs_refresh() const; // check if display exhausted
+  void refresh_display();     // reveal more quantity
+
   std::string side_to_string() const;
   std::string type_to_string() const;
   std::string tif_to_string() const;

@@ -3,11 +3,75 @@
 #include <iomanip>
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
 OrderBook::OrderBook() {}
 
+std::vector<OrderBook::PriceLevel>
+OrderBook::get_bid_levels(int max_levels) const {
+  std::vector<PriceLevel> levels;
+
+  if (bids_.empty()) {
+    return levels;
+  }
+
+  auto bids_copy = bids_;
+  std::map<double, std::pair<int, int>> price_map;
+
+  while (!bids_copy.empty()) {
+    Order order = bids_copy.top();
+    bids_copy.pop();
+
+    price_map[order.price].first += order.remaining_qty;
+    price_map[order.price].second += 1;
+  }
+
+  int count = 0;
+  for (auto it = price_map.rbegin();
+       it != price_map.rend() && count < max_levels; ++it, ++count) {
+    PriceLevel level;
+    level.price = it->first;
+    level.total_quantity = it->second.first;
+    level.num_orders = it->second.second;
+    levels.push_back(level);
+  }
+
+  return levels;
+}
+
+std::vector<OrderBook::PriceLevel>
+OrderBook::get_ask_levels(int max_levels) const {
+  std::vector<PriceLevel> levels;
+
+  if (asks_.empty()) {
+    return levels;
+  }
+
+  auto asks_copy = asks_;
+  std::map<double, std::pair<int, int>> price_map;
+
+  while (!asks_copy.empty()) {
+    Order order = asks_copy.top();
+    asks_copy.pop();
+
+    price_map[order.price].first += order.remaining_qty;
+    price_map[order.price].second += 1;
+  }
+
+  int count = 0;
+  for (auto it = price_map.begin(); it != price_map.end() && count < max_levels;
+       ++it, ++count) {
+    PriceLevel level;
+    level.price = it->first;
+    level.total_quantity = it->second.first;
+    level.num_orders = it->second.second;
+    levels.push_back(level);
+  }
+
+  return levels;
+}
 bool OrderBook::cancel_order(int order_id) {
   Timer timer;
   timer.start();
@@ -40,6 +104,139 @@ bool OrderBook::cancel_order(int order_id) {
             << " (latency: " << timer.elapsed_nanoseconds() << " ns)" << '\n';
 
   return true;
+}
+
+void OrderBook::print_market_depth(int levels) const {
+  auto bid_levels = get_bid_levels(levels);
+  auto ask_levels = get_ask_levels(levels);
+
+  std::cout << "\n=== Market Depth (" << levels << " levels) ===" << std::endl;
+  std::cout << std::string(70, '=') << std::endl;
+
+  // Header
+  std::cout << std::setw(25) << std::right << "BIDS"
+            << " | " << std::setw(10) << "PRICE"
+            << " | " << std::setw(25) << std::left << "ASKS" << std::endl;
+  std::cout << std::string(70, '-') << std::endl;
+
+  // Determine how many rows to display
+  size_t max_rows = std::max(bid_levels.size(), ask_levels.size());
+
+  // Calculate totals
+  int total_bid_qty = 0;
+  int total_ask_qty = 0;
+  for (const auto &level : bid_levels)
+    total_bid_qty += level.total_quantity;
+  for (const auto &level : ask_levels)
+    total_ask_qty += level.total_quantity;
+
+  // Display rows (asks in reverse order - highest first)
+  for (size_t i = 0; i < max_rows; ++i) {
+    // Determine indices
+    size_t ask_idx =
+        (ask_levels.size() > i) ? (ask_levels.size() - 1 - i) : SIZE_MAX;
+    size_t bid_idx = i;
+
+    // Format bid side
+    std::ostringstream bid_str;
+    if (bid_idx < bid_levels.size()) {
+      bid_str << bid_levels[bid_idx].total_quantity << " ("
+              << bid_levels[bid_idx].num_orders << " order";
+      if (bid_levels[bid_idx].num_orders > 1)
+        bid_str << "s";
+      bid_str << ")";
+    }
+
+    // Format price
+    std::ostringstream price_str;
+    if (ask_idx != SIZE_MAX && ask_idx < ask_levels.size()) {
+      price_str << std::fixed << std::setprecision(2) << "$"
+                << ask_levels[ask_idx].price;
+    } else if (bid_idx < bid_levels.size()) {
+      price_str << std::fixed << std::setprecision(2) << "$"
+                << bid_levels[bid_idx].price;
+    }
+
+    // Format ask side
+    std::ostringstream ask_str;
+    if (ask_idx != SIZE_MAX && ask_idx < ask_levels.size()) {
+      ask_str << ask_levels[ask_idx].total_quantity << " ("
+              << ask_levels[ask_idx].num_orders << " order";
+      if (ask_levels[ask_idx].num_orders > 1)
+        ask_str << "s";
+      ask_str << ")";
+    }
+
+    // Print row
+    std::cout << std::setw(25) << std::right << bid_str.str() << " | "
+              << std::setw(10) << std::left << price_str.str() << " | "
+              << std::setw(25) << std::left << ask_str.str() << std::endl;
+  }
+
+  // Footer with totals
+  std::cout << std::string(70, '-') << std::endl;
+  std::cout << std::setw(25) << std::right
+            << ("Total: " + std::to_string(total_bid_qty) + " shares") << " | "
+            << std::setw(10) << " "
+            << " | " << std::setw(25) << std::left
+            << ("Total: " + std::to_string(total_ask_qty) + " shares")
+            << std::endl;
+  std::cout << std::string(70, '=') << std::endl;
+
+  // Additional stats
+  auto spread = get_spread();
+  if (spread) {
+    double spread_bps = (*spread / bid_levels[0].price) * 10000;
+    std::cout << "Spread: $" << std::fixed << std::setprecision(4) << *spread
+              << " (" << std::fixed << std::setprecision(2) << spread_bps
+              << " bps)" << std::endl;
+  }
+  std::cout << std::endl;
+}
+
+void OrderBook::print_market_depth_compact() const {
+  auto bid_levels = get_bid_levels(10); // Get more levels for compact view
+  auto ask_levels = get_ask_levels(10);
+
+  std::cout << "\n=== Order Book (Compact) ===" << std::endl;
+
+  // Print asks (top to bottom)
+  std::cout << "\n ASKS (sellers):" << std::endl;
+  if (ask_levels.empty()) {
+    std::cout << "  (no asks)" << std::endl;
+  } else {
+    for (auto it = ask_levels.rbegin(); it != ask_levels.rend(); ++it) {
+      std::cout << "  $" << std::fixed << std::setprecision(2) << std::setw(8)
+                << it->price << "  │ " << std::setw(6) << it->total_quantity
+                << " (" << it->num_orders << ")" << std::endl;
+    }
+  }
+
+  // Spread line
+  auto spread = get_spread();
+  if (spread) {
+    std::cout << std::string(30, '-') << std::endl;
+    std::cout << "  Spread: $" << std::fixed << std::setprecision(4) << *spread
+              << std::endl;
+    std::cout << std::string(30, '-') << std::endl;
+  } else {
+    std::cout << std::string(30, '-') << std::endl;
+    std::cout << "  (crossed or one-sided)" << std::endl;
+    std::cout << std::string(30, '-') << std::endl;
+  }
+
+  // Print bids (top to bottom)
+  std::cout << "\n BIDS (buyers):" << std::endl;
+  if (bid_levels.empty()) {
+    std::cout << "  (no bids)" << std::endl;
+  } else {
+    for (const auto &level : bid_levels) {
+      std::cout << "  $" << std::fixed << std::setprecision(2) << std::setw(8)
+                << level.price << "  │ " << std::setw(6) << level.total_quantity
+                << " (" << level.num_orders << ")" << std::endl;
+    }
+  }
+  std::cout << std::endl;
 }
 
 bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
@@ -152,18 +349,17 @@ bool OrderBook::can_fill_order(const Order &order) const {
 }
 
 void OrderBook::match_buy_order(Order &buy_order) {
-  // FOK: Check if ENTIRE order can be filled before matching
+  // FOK check (unchanged)
   if (buy_order.tif == TimeInForce::FOK) {
     if (!can_fill_order(buy_order)) {
-      // Cancel entire order
       auto it = active_orders_.find(buy_order.id);
       if (it != active_orders_.end()) {
         it->second.state = OrderState::CANCELLED;
       }
-      std::cout << " FOK order " << buy_order.id
+      std::cout << "FOK order " << buy_order.id
                 << " cancelled (insufficient liquidity to fill "
                 << buy_order.quantity << " shares)" << std::endl;
-      return; // Don't match anything
+      return;
     }
   }
 
@@ -171,7 +367,11 @@ void OrderBook::match_buy_order(Order &buy_order) {
     Order best_ask = asks_.top();
 
     if (buy_order.is_market_order() || buy_order.price >= best_ask.price) {
-      int trade_qty = std::min(buy_order.remaining_qty, best_ask.remaining_qty);
+      // CRITICAL: Only match against DISPLAY quantity for icebergs
+      int available_qty =
+          best_ask.is_iceberg() ? best_ask.display_qty : best_ask.remaining_qty;
+
+      int trade_qty = std::min(buy_order.remaining_qty, available_qty);
       double trade_price = best_ask.price;
 
       fills_.emplace_back(buy_order.id, best_ask.id, trade_price, trade_qty);
@@ -179,9 +379,18 @@ void OrderBook::match_buy_order(Order &buy_order) {
       buy_order.remaining_qty -= trade_qty;
       best_ask.remaining_qty -= trade_qty;
 
+      // Update display quantity for icebergs
+      if (best_ask.is_iceberg()) {
+        best_ask.display_qty -= trade_qty;
+      }
+
       asks_.pop();
 
-      if (best_ask.remaining_qty > 0) {
+      // Check if ask needs refresh (iceberg exhausted display)
+      if (best_ask.needs_refresh()) {
+        best_ask.refresh_display();
+        asks_.push(best_ask); // Re-add with new timestamp (loses priority!)
+      } else if (best_ask.remaining_qty > 0) {
         asks_.push(best_ask);
       }
 
@@ -189,6 +398,9 @@ void OrderBook::match_buy_order(Order &buy_order) {
       auto buy_it = active_orders_.find(buy_order.id);
       if (buy_it != active_orders_.end()) {
         buy_it->second.remaining_qty = buy_order.remaining_qty;
+        if (buy_order.is_iceberg()) {
+          buy_it->second.display_qty = buy_order.display_qty;
+        }
         if (buy_order.is_filled()) {
           buy_it->second.state = OrderState::FILLED;
         } else if (buy_order.remaining_qty < buy_order.quantity) {
@@ -199,6 +411,10 @@ void OrderBook::match_buy_order(Order &buy_order) {
       auto ask_it = active_orders_.find(best_ask.id);
       if (ask_it != active_orders_.end()) {
         ask_it->second.remaining_qty = best_ask.remaining_qty;
+        if (best_ask.is_iceberg()) {
+          ask_it->second.display_qty = best_ask.display_qty;
+          ask_it->second.hidden_qty = best_ask.hidden_qty;
+        }
         if (best_ask.is_filled()) {
           ask_it->second.state = OrderState::FILLED;
         } else if (best_ask.remaining_qty < best_ask.quantity) {
@@ -213,10 +429,8 @@ void OrderBook::match_buy_order(Order &buy_order) {
   // Handle unfilled quantity based on TIF
   if (buy_order.remaining_qty > 0) {
     if (buy_order.can_rest_in_book()) {
-      // GTC or DAY: Add to book
       bids_.push(buy_order);
     } else {
-      // IOC or FOK: Cancel remainder
       auto it = active_orders_.find(buy_order.id);
       if (it != active_orders_.end()) {
         it->second.state = OrderState::CANCELLED;
@@ -238,10 +452,9 @@ void OrderBook::match_buy_order(Order &buy_order) {
 }
 
 void OrderBook::match_sell_order(Order &sell_order) {
-  // FOK: Check if ENTIRE order can be filled before matching
+  // FOK check (unchanged)
   if (sell_order.tif == TimeInForce::FOK) {
     if (!can_fill_order(sell_order)) {
-      // Cancel entire order
       auto it = active_orders_.find(sell_order.id);
       if (it != active_orders_.end()) {
         it->second.state = OrderState::CANCELLED;
@@ -249,7 +462,7 @@ void OrderBook::match_sell_order(Order &sell_order) {
       std::cout << "FOK order " << sell_order.id
                 << " cancelled (insufficient liquidity to fill "
                 << sell_order.quantity << " shares)" << std::endl;
-      return; // Don't match anything
+      return;
     }
   }
 
@@ -257,8 +470,11 @@ void OrderBook::match_sell_order(Order &sell_order) {
     Order best_bid = bids_.top();
 
     if (sell_order.is_market_order() || sell_order.price <= best_bid.price) {
-      int trade_qty =
-          std::min(sell_order.remaining_qty, best_bid.remaining_qty);
+      // CRITICAL: Only match against DISPLAY quantity for icebergs
+      int available_qty =
+          best_bid.is_iceberg() ? best_bid.display_qty : best_bid.remaining_qty;
+
+      int trade_qty = std::min(sell_order.remaining_qty, available_qty);
       double trade_price = best_bid.price;
 
       fills_.emplace_back(best_bid.id, sell_order.id, trade_price, trade_qty);
@@ -266,9 +482,18 @@ void OrderBook::match_sell_order(Order &sell_order) {
       sell_order.remaining_qty -= trade_qty;
       best_bid.remaining_qty -= trade_qty;
 
+      // Update display quantity for icebergs
+      if (best_bid.is_iceberg()) {
+        best_bid.display_qty -= trade_qty;
+      }
+
       bids_.pop();
 
-      if (best_bid.remaining_qty > 0) {
+      // Check if bid needs refresh (iceberg exhausted display)
+      if (best_bid.needs_refresh()) {
+        best_bid.refresh_display();
+        bids_.push(best_bid); // Re-add with new timestamp (loses priority!)
+      } else if (best_bid.remaining_qty > 0) {
         bids_.push(best_bid);
       }
 
@@ -276,6 +501,9 @@ void OrderBook::match_sell_order(Order &sell_order) {
       auto sell_it = active_orders_.find(sell_order.id);
       if (sell_it != active_orders_.end()) {
         sell_it->second.remaining_qty = sell_order.remaining_qty;
+        if (sell_order.is_iceberg()) {
+          sell_it->second.display_qty = sell_order.display_qty;
+        }
         if (sell_order.is_filled()) {
           sell_it->second.state = OrderState::FILLED;
         } else if (sell_order.remaining_qty < sell_order.quantity) {
@@ -286,6 +514,10 @@ void OrderBook::match_sell_order(Order &sell_order) {
       auto bid_it = active_orders_.find(best_bid.id);
       if (bid_it != active_orders_.end()) {
         bid_it->second.remaining_qty = best_bid.remaining_qty;
+        if (best_bid.is_iceberg()) {
+          bid_it->second.display_qty = best_bid.display_qty;
+          bid_it->second.hidden_qty = best_bid.hidden_qty;
+        }
         if (best_bid.is_filled()) {
           bid_it->second.state = OrderState::FILLED;
         } else if (best_bid.remaining_qty < best_bid.quantity) {
@@ -300,10 +532,8 @@ void OrderBook::match_sell_order(Order &sell_order) {
   // Handle unfilled quantity based on TIF
   if (sell_order.remaining_qty > 0) {
     if (sell_order.can_rest_in_book()) {
-      // GTC or DAY: Add to book
       asks_.push(sell_order);
     } else {
-      // IOC or FOK: Cancel remainder
       auto it = active_orders_.find(sell_order.id);
       if (it != active_orders_.end()) {
         it->second.state = OrderState::CANCELLED;

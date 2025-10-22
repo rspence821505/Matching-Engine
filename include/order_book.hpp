@@ -25,6 +25,15 @@ private:
   void match_sell_order(Order &sell_order);
   bool can_fill_order(const Order &order) const;
 
+  struct PriceLevel {
+    double price;
+    int total_quantity;
+    int num_orders;
+  };
+
+  std::vector<PriceLevel> get_bid_levels(int max_levels) const;
+  std::vector<PriceLevel> get_ask_levels(int max_levels) const;
+
 public:
   OrderBook();
 
@@ -50,6 +59,8 @@ public:
   void print_book_summary() const;
   void print_trade_timeline() const;
   void print_order_status(int order_id) const;
+  void print_market_depth(int levels) const;
+  void print_market_depth_compact() const;
 
   size_t bids_size() const { return bids_.size(); }
   size_t asks_size() const { return asks_.size(); }
