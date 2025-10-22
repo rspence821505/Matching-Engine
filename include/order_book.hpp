@@ -23,10 +23,7 @@ private:
 
   void match_buy_order(Order &buy_order);
   void match_sell_order(Order &sell_order);
-
-  // Helpers ot rebuild priority queues
-  void rebuild_bids();
-  void rebuild_asks();
+  bool can_fill_order(const Order &order) const;
 
 public:
   OrderBook();

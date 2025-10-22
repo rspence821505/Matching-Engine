@@ -19,6 +19,14 @@ enum class OrderType {
   MARKET, // Market order ( no price limit)
 };
 
+// Time-in-Force
+enum class TimeInForce {
+  GTC, // Good-Till-Cancel:: Remains until filled or cancelled
+  IOC, // Immediate-Or-Cancel: Fill immediately, cancel remainder
+  FOK, // Fill-Or-Kill: Fill completely or cancel entire order
+  DAY, // Day order: Valid until end of trading day
+};
+
 // Order States to track order lifecycle
 enum class OrderState {
   PENDING,          // Just created, not in book yet

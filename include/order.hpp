@@ -8,24 +8,29 @@
 struct Order {
   int id;
   Side side;
-  OrderType type; // LIMIT or MARKET
-  double price;   // For Limit orders (infinity for market)
+  OrderType type;  // LIMIT or MARKET
+  TimeInForce tif; // Time-in-Force
+  double price;    // For Limit orders (infinity for market)
   int quantity;
   int remaining_qty;
   TimePoint timestamp;
   OrderState state;
 
   // Constructor for LIMIT orders
-  Order(int id_, Side side_, double price_, int qty_);
+  Order(int id_, Side side_, double price_, int qty_,
+        TimeInForce tif_ = TimeInForce::GTC);
 
   // Constructor for MARKET orders
-  Order(int id_, Side side_, OrderType type_, int qty_);
+  Order(int id_, Side side_, OrderType type_, int qty_,
+        TimeInForce tif_ = TimeInForce::IOC);
 
   bool is_filled() const;
   bool is_active() const;
   bool is_market_order() const;
+  bool can_rest_in_book() const;
   std::string side_to_string() const;
   std::string type_to_string() const;
+  std::string tif_to_string() const;
   std::string state_to_string() const;
 
   friend std::ostream &operator<<(std::ostream &os, const Order &o);

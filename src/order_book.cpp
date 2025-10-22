@@ -116,12 +116,60 @@ void OrderBook::print_order_status(int order_id) const {
   }
 }
 
+bool OrderBook::can_fill_order(const Order &order) const {
+  int available_qty = 0;
+
+  if (order.side == Side::BUY) {
+    // Check ask side
+    auto asks_copy = asks_; // copy ot iterate without modifying.
+
+    while (!asks_copy.empty() && available_qty < order.quantity) {
+      Order best_ask = asks_copy.top();
+
+      // check if price matches or market order
+      if (order.is_market_order() || order.price >= best_ask.price) {
+        available_qty += best_ask.remaining_qty;
+        asks_copy.pop();
+      } else {
+        break; // No more matching prices
+      }
+    }
+  } else {
+    auto bids_copy = bids_; // copy to iterate without modifying
+    while (!bids_copy.empty() && available_qty < order.quantity) {
+      Order best_bid = bids_copy.top();
+
+      // check if price match or market order
+      if (order.is_market_order() || order.price <= best_bid.price) {
+        available_qty += best_bid.remaining_qty;
+        bids_copy.pop();
+      } else {
+        break; // No more matching prices
+      }
+    }
+  }
+  return available_qty >= order.quantity;
+}
+
 void OrderBook::match_buy_order(Order &buy_order) {
+  // FOK: Check if ENTIRE order can be filled before matching
+  if (buy_order.tif == TimeInForce::FOK) {
+    if (!can_fill_order(buy_order)) {
+      // Cancel entire order
+      auto it = active_orders_.find(buy_order.id);
+      if (it != active_orders_.end()) {
+        it->second.state = OrderState::CANCELLED;
+      }
+      std::cout << " FOK order " << buy_order.id
+                << " cancelled (insufficient liquidity to fill "
+                << buy_order.quantity << " shares)" << std::endl;
+      return; // Don't match anything
+    }
+  }
+
   while (buy_order.remaining_qty > 0 && !asks_.empty()) {
     Order best_ask = asks_.top();
 
-    // Market orders always match (no price check)
-    // Limit orders need price check
     if (buy_order.is_market_order() || buy_order.price >= best_ask.price) {
       int trade_qty = std::min(buy_order.remaining_qty, best_ask.remaining_qty);
       double trade_price = best_ask.price;
@@ -158,32 +206,56 @@ void OrderBook::match_buy_order(Order &buy_order) {
         }
       }
     } else {
-      break; // Limit order can't match, stop
+      break;
     }
   }
 
-  // Market orders DON'T rest in book, only limit orders do
-  if (buy_order.remaining_qty > 0 && !buy_order.is_market_order()) {
-    bids_.push(buy_order);
-  } else if (buy_order.remaining_qty > 0 && buy_order.is_market_order()) {
-    // Market order had unfilled quantity - mark as cancelled
-    auto it = active_orders_.find(buy_order.id);
-    if (it != active_orders_.end()) {
-      it->second.state = OrderState::CANCELLED;
-      std::cout << "Market order " << buy_order.id << " partially filled ("
-                << (buy_order.quantity - buy_order.remaining_qty) << "/"
-                << buy_order.quantity << "), remaining cancelled (no liquidity)"
-                << std::endl;
+  // Handle unfilled quantity based on TIF
+  if (buy_order.remaining_qty > 0) {
+    if (buy_order.can_rest_in_book()) {
+      // GTC or DAY: Add to book
+      bids_.push(buy_order);
+    } else {
+      // IOC or FOK: Cancel remainder
+      auto it = active_orders_.find(buy_order.id);
+      if (it != active_orders_.end()) {
+        it->second.state = OrderState::CANCELLED;
+      }
+
+      if (buy_order.tif == TimeInForce::IOC) {
+        int filled = buy_order.quantity - buy_order.remaining_qty;
+        if (filled > 0) {
+          std::cout << "IOC order " << buy_order.id << " partially filled ("
+                    << filled << "/" << buy_order.quantity
+                    << "), remaining cancelled" << std::endl;
+        } else {
+          std::cout << "IOC order " << buy_order.id
+                    << " cancelled (no immediate liquidity)" << std::endl;
+        }
+      }
     }
   }
 }
 
 void OrderBook::match_sell_order(Order &sell_order) {
+  // FOK: Check if ENTIRE order can be filled before matching
+  if (sell_order.tif == TimeInForce::FOK) {
+    if (!can_fill_order(sell_order)) {
+      // Cancel entire order
+      auto it = active_orders_.find(sell_order.id);
+      if (it != active_orders_.end()) {
+        it->second.state = OrderState::CANCELLED;
+      }
+      std::cout << "FOK order " << sell_order.id
+                << " cancelled (insufficient liquidity to fill "
+                << sell_order.quantity << " shares)" << std::endl;
+      return; // Don't match anything
+    }
+  }
+
   while (sell_order.remaining_qty > 0 && !bids_.empty()) {
     Order best_bid = bids_.top();
 
-    // Market orders always match (no price check)
-    // Limit orders need price check
     if (sell_order.is_market_order() || sell_order.price <= best_bid.price) {
       int trade_qty =
           std::min(sell_order.remaining_qty, best_bid.remaining_qty);
@@ -221,22 +293,33 @@ void OrderBook::match_sell_order(Order &sell_order) {
         }
       }
     } else {
-      break; // Limit order can't match, stop
+      break;
     }
   }
 
-  // Market orders DON'T rest in book, only limit orders do
-  if (sell_order.remaining_qty > 0 && !sell_order.is_market_order()) {
-    asks_.push(sell_order);
-  } else if (sell_order.remaining_qty > 0 && sell_order.is_market_order()) {
-    // Market order had unfilled quantity - mark as cancelled
-    auto it = active_orders_.find(sell_order.id);
-    if (it != active_orders_.end()) {
-      it->second.state = OrderState::CANCELLED;
-      std::cout << "Market order " << sell_order.id << " partially filled ("
-                << (sell_order.quantity - sell_order.remaining_qty) << "/"
-                << sell_order.quantity
-                << "), remaining cancelled (no liquidity)" << std::endl;
+  // Handle unfilled quantity based on TIF
+  if (sell_order.remaining_qty > 0) {
+    if (sell_order.can_rest_in_book()) {
+      // GTC or DAY: Add to book
+      asks_.push(sell_order);
+    } else {
+      // IOC or FOK: Cancel remainder
+      auto it = active_orders_.find(sell_order.id);
+      if (it != active_orders_.end()) {
+        it->second.state = OrderState::CANCELLED;
+      }
+
+      if (sell_order.tif == TimeInForce::IOC) {
+        int filled = sell_order.quantity - sell_order.remaining_qty;
+        if (filled > 0) {
+          std::cout << "IOC order " << sell_order.id << " partially filled ("
+                    << filled << "/" << sell_order.quantity
+                    << "), remaining cancelled" << std::endl;
+        } else {
+          std::cout << "IOC order " << sell_order.id
+                    << " cancelled (no immediate liquidity)" << std::endl;
+        }
+      }
     }
   }
 }
