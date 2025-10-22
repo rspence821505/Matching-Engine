@@ -8,6 +8,114 @@
 
 OrderBook::OrderBook() {}
 
+bool OrderBook::cancel_order(int order_id) {
+  Timer timer;
+  timer.start();
+
+  // check if order exits and is active
+  auto it = active_orders_.find(order_id);
+  if (it == active_orders_.end()) {
+    std::cout << "Order " << order_id << " not found or already processed."
+              << '\n';
+    return false;
+  }
+  Order &order = it->second;
+
+  // Can't cancel filled orders
+  if (order.is_filled()) {
+    std::cout << "Order " << order_id << " is already filled." << '\n';
+    return false;
+  }
+
+  // Mark as canceled
+  order.state = OrderState::CANCELLED;
+
+  // Move to cancelled Orders
+  cancelled_orders_.insert({order_id, order});
+  active_orders_.erase(it);
+
+  timer.stop();
+
+  std::cout << "✓ Cancelled order " << order_id
+            << " (latency: " << timer.elapsed_nanoseconds() << " ns)" << '\n';
+
+  return true;
+}
+
+bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
+                            std::optional<int> new_quantity) {
+  Timer timer;
+  timer.start();
+
+  // Check if order exists
+  auto it = active_orders_.find(order_id);
+  if (it == active_orders_.end()) {
+    std::cout << "Order " << order_id << " not found." << '\n';
+    return false;
+  }
+  Order &order = it->second;
+
+  // Can't amend filled orders
+  if (order.is_filled()) {
+    std::cout << "Order " << order_id << " is already filled." << '\n';
+    return false;
+  }
+
+  // Lazy deletion: Cancel old order and create a new one
+  Side side = order.side;
+
+  // If new_price has a value, use it. Otherwise, use the default (order.price)
+  double price = new_price.value_or(order.price);
+  int quantity = new_quantity.value_or(order.remaining_qty);
+
+  cancel_order(order_id);
+
+  // Create new order with same ID
+  Order amended_order(order_id, side, price, quantity);
+  amended_order.state = OrderState::ACTIVE;
+
+  // re add to book
+  if (side == Side::BUY) {
+    bids_.push(amended_order);
+  } else {
+    asks_.push(amended_order);
+  }
+
+  active_orders_.insert({order_id, amended_order});
+
+  timer.stop();
+
+  std::cout << "✓ Amended order " << order_id
+            << " (latency: " << timer.elapsed_nanoseconds() << " ns)" << '\n';
+
+  return true;
+}
+
+std::optional<Order> OrderBook::get_order(int order_id) const {
+  auto it = active_orders_.find(order_id);
+  if (it != active_orders_.end()) {
+    return it->second;
+  }
+
+  // Check cancelled orders
+  auto cancelled_it = cancelled_orders_.find(order_id);
+  if (cancelled_it != cancelled_orders_.end()) {
+    return cancelled_it->second;
+  }
+
+  return std::nullopt;
+}
+
+void OrderBook::print_order_status(int order_id) const {
+  auto order = get_order(order_id);
+  if (order) {
+    std::cout << "\n=== Order Status ===" << std::endl;
+    std::cout << *order << std::endl;
+  } else {
+    std::cout << "Order " << order_id << " not found." << std::endl;
+  }
+}
+
 void OrderBook::match_buy_order(Order &buy_order) {
   while (buy_order.remaining_qty > 0 && !asks_.empty()) {
     Order best_ask = asks_.top();
@@ -25,6 +133,27 @@ void OrderBook::match_buy_order(Order &buy_order) {
 
       if (best_ask.remaining_qty > 0) {
         asks_.push(best_ask);
+      }
+
+      // Update both orders in active_orders_
+      auto buy_it = active_orders_.find(buy_order.id);
+      if (buy_it != active_orders_.end()) {
+        buy_it->second.remaining_qty = buy_order.remaining_qty;
+        if (buy_order.is_filled()) {
+          buy_it->second.state = OrderState::FILLED;
+        } else if (buy_order.remaining_qty < buy_order.quantity) {
+          buy_it->second.state = OrderState::PARTIALLY_FILLED;
+        }
+      }
+
+      auto ask_it = active_orders_.find(best_ask.id);
+      if (ask_it != active_orders_.end()) {
+        ask_it->second.remaining_qty = best_ask.remaining_qty;
+        if (best_ask.is_filled()) {
+          ask_it->second.state = OrderState::FILLED;
+        } else if (best_ask.remaining_qty < best_ask.quantity) {
+          ask_it->second.state = OrderState::PARTIALLY_FILLED;
+        }
       }
     } else {
       break;
@@ -55,6 +184,27 @@ void OrderBook::match_sell_order(Order &sell_order) {
       if (best_bid.remaining_qty > 0) {
         bids_.push(best_bid);
       }
+
+      // ✅ NEW: Update both orders in active_orders_
+      auto sell_it = active_orders_.find(sell_order.id);
+      if (sell_it != active_orders_.end()) {
+        sell_it->second.remaining_qty = sell_order.remaining_qty;
+        if (sell_order.is_filled()) {
+          sell_it->second.state = OrderState::FILLED;
+        } else if (sell_order.remaining_qty < sell_order.quantity) {
+          sell_it->second.state = OrderState::PARTIALLY_FILLED;
+        }
+      }
+
+      auto bid_it = active_orders_.find(best_bid.id);
+      if (bid_it != active_orders_.end()) {
+        bid_it->second.remaining_qty = best_bid.remaining_qty;
+        if (best_bid.is_filled()) {
+          bid_it->second.state = OrderState::FILLED;
+        } else if (best_bid.remaining_qty < best_bid.quantity) {
+          bid_it->second.state = OrderState::PARTIALLY_FILLED;
+        }
+      }
     } else {
       break;
     }
@@ -70,6 +220,10 @@ void OrderBook::add_order(Order o) {
   timer.start();
 
   Order order = o;
+  order.state = OrderState::ACTIVE; // Mark as active
+
+  // Track the order
+  active_orders_.insert({order.id, order});
 
   if (order.side == Side::BUY) {
     match_buy_order(order);
@@ -77,6 +231,13 @@ void OrderBook::add_order(Order o) {
     match_sell_order(order);
   } else {
     throw std::runtime_error("Invalid order side");
+  }
+
+  // Update order state after matching
+  if (order.is_filled()) {
+    active_orders_.at(order.id).state = OrderState::FILLED;
+  } else if (order.remaining_qty < order.quantity) {
+    active_orders_.at(order.id).state = OrderState::PARTIALLY_FILLED;
   }
 
   timer.stop();

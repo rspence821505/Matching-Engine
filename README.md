@@ -121,12 +121,3 @@ Typical performance on modern hardware:
 ## License
 
 MIT License
-
-## Author
-
-Built for hedge fund interview preparation, demonstrating:
-
-- Low-latency C++ development
-- Financial market microstructure
-- Performance optimization
-- Production-quality code organization

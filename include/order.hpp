@@ -12,11 +12,14 @@ struct Order {
   int quantity;
   int remaining_qty;
   TimePoint timestamp;
+  OrderState state;
 
   Order(int id_, Side side_, double price_, int qty_);
 
   bool is_filled() const;
+  bool is_active() const;
   std::string side_to_string() const;
+  std::string state_to_string() const;
 
   friend std::ostream &operator<<(std::ostream &os, const Order &o);
 };
