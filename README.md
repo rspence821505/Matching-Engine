@@ -111,8 +111,7 @@ Typical performance on modern hardware:
 
 ## Future Enhancements
 
-- [ ] Market orders
-- [ ] Time-in-force rules (IOC, FOK, GTC)
+- [ ] Stop orders
 - [ ] Trade Replay
 - [ ] Multi-threaded order processing
 - [ ] Persistent order storage
