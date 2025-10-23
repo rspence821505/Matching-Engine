@@ -580,19 +580,21 @@ void OrderBook::add_order(Order o) {
   timer.start();
 
   Order order = o;
-  order.state = OrderState::ACTIVE; // Mark as active
+  order.state = OrderState::ACTIVE;
 
-  // Track the order
   active_orders_.insert({order.id, order});
 
   if (logging_enabled_) {
+    // Handle market orders with infinite price properly
+    double log_price = order.is_market_order() ? 0.0 : order.price;
+
     if (order.is_iceberg()) {
       event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
-                              order.tif, order.price, order.quantity,
+                              order.tif, log_price, order.quantity,
                               order.peak_size);
     } else {
       event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
-                              order.tif, order.price, order.quantity);
+                              order.tif, log_price, order.quantity);
     }
   }
 

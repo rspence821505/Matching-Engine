@@ -1,5 +1,6 @@
 #include "event.hpp"
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 
 std::string OrderEvent::to_string() const {
@@ -38,6 +39,14 @@ std::string OrderEvent::to_csv() const {
   // Side
   if (type == EventType::NEW_ORDER) {
     oss << (side == Side::BUY ? "BUY" : "SELL");
+  } else {
+    oss << "N/A";
+  }
+  oss << ",";
+
+  // Order Type
+  if (type == EventType::NEW_ORDER) {
+    oss << (order_type == OrderType::LIMIT ? "LIMIT" : "MARKET");
   } else {
     oss << "N/A";
   }
@@ -89,7 +98,16 @@ OrderEvent OrderEvent::from_csv(const std::string &line) {
   }
 
   if (tokens.size() < 15) {
-    throw std::runtime_error("Invalide CSV line: insufficient fields");
+    // ADD DEBUG OUTPUT HERE
+    std::cerr << "Invalid CSV line (got " << tokens.size()
+              << " fields, expected 15+):" << std::endl;
+    std::cerr << "Line: " << line << std::endl;
+    std::cerr << "Tokens parsed: ";
+    for (size_t i = 0; i < tokens.size(); ++i) {
+      std::cerr << "[" << i << "]=\"" << tokens[i] << "\" ";
+    }
+    std::cerr << std::endl;
+    throw std::runtime_error("Invalid CSV line: insufficient fields");
   }
 
   // Parse timestamp

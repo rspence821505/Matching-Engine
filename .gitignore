@@ -39,3 +39,14 @@
 
 # debug information files
 *.dwo
+
+# CSV files
+*.csv
+
+# Build directory
+build/
+build/*
+
+# if you want to keep build/ structure but ignore contents
+# build/**/*
+# !build/.gitkeep
