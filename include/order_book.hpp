@@ -1,6 +1,7 @@
 #ifndef ORDER_BOOK_HPP
 #define ORDER_BOOK_HPP
 
+#include "event.hpp"
 #include "fill.hpp"
 #include "order.hpp"
 #include "timer.hpp"
@@ -34,6 +35,10 @@ private:
   std::vector<PriceLevel> get_bid_levels(int max_levels) const;
   std::vector<PriceLevel> get_ask_levels(int max_levels) const;
 
+  // Event logging
+  std::vector<OrderEvent> event_log_;
+  bool logging_enabled_;
+
 public:
   OrderBook();
 
@@ -49,6 +54,19 @@ public:
   bool amend_order(int order_id, std::optional<double> new_price,
                    std::optional<int> new_quantity);
   std::optional<Order> get_order(int order_id) const;
+
+  // Event logging control
+  void enable_logging() { logging_enabled_ = true; }
+  void disable_logging() { logging_enabled_ = false; }
+  bool is_logging() const { return logging_enabled_; }
+
+  // Save/load events
+  void save_events(const std::string &filename) const;
+  size_t event_count() const { return event_log_.size(); }
+  void clear_events() { event_log_.clear(); }
+
+  // Get events for validation
+  const std::vector<OrderEvent> &get_events() const { return event_log_; }
 
   // Statistics and display methods
   void print_fills() const;

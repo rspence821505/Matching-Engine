@@ -8,8 +8,8 @@ std::string OrderEvent::to_string() const {
 
   if (type == EventType::NEW_ORDER) {
     oss << "side=" << (side == Side::BUY ? "BUY" : "SELL")
-        << " price=" << std::fixed << std::setprecision(2) << price;
-    << " qty=" << quantity;
+        << " price=" << std::fixed << std::setprecision(2) << price
+        << " qty=" << quantity;
     if (peak_size > 0) {
       oss << " peak=" << peak_size;
     }
@@ -25,7 +25,7 @@ std::string OrderEvent::to_string() const {
   return oss.str();
 }
 
-std::string OrderEvent::csv_header() const {
+std::string OrderEvent::csv_header() {
   return "timestamp,type,order_id,side,order-type,tif,price,quantity,peak_size,"
          "has_new_price,has_new_qty,new_price,new_qty,counterparty,fill_qty";
 }
@@ -55,7 +55,7 @@ std::string OrderEvent::to_csv() const {
     case TimeInForce::FOK:
       oss << "FOK";
       break;
-    case TImeInForce::DAY:
+    case TimeInForce::DAY:
       oss << "DAY";
       break;
     }
@@ -65,8 +65,8 @@ std::string OrderEvent::to_csv() const {
   oss << ",";
 
   // Price, quantity, peak_size
-  oss < std::fixed << std::setprecision(2) << price << "," << quantity << ","
-                   << peak_size << ",";
+  oss << std::fixed << std::setprecision(2) << price << "," << quantity << ","
+      << peak_size << ",";
 
   // Amendment fields
   oss << (has_new_price ? "1" : "0") << "," << (has_new_quantity ? "1" : "0")
@@ -94,26 +94,23 @@ OrderEvent OrderEvent::from_csv(const std::string &line) {
 
   // Parse timestamp
   long long ts_count = std::stoll(tokens[0]);
-  TimePoint ts(std::chrono::nanoseconds(ts_count));
+  TimePoint ts{std::chrono::nanoseconds(ts_count)};
 
   // Parse event type
   EventType type = string_to_event_type(tokens[1]);
   int order_id = std::stoi(tokens[2]);
 
   if (type == EventType::NEW_ORDER) {
-    Side side = (tokens[3] == "BUY") ? Side::BUY : Side::SELL,
-         OrderType ot =
-             (tokens[4] == "LIMIT") ? ORderType::LIMIT : OrderType::MARKET;
+    Side side = (tokens[3] == "BUY") ? Side::BUY : Side::SELL;
+    OrderType ot =
+        (tokens[4] == "LIMIT") ? OrderType::LIMIT : OrderType::MARKET;
 
     TimeInForce tif;
-    if(tokens[5]] === "GTC")
-      {
-      tif = TimeInForce::GTC;}
-    else if(tokens[5]] === "IOC")
-      {
-      tif = TimeInForce::IOC;}
-    else if(tokens[5]] === "FOK")
-      {
+    if (tokens[5] == "GTC") {
+      tif = TimeInForce::GTC;
+    } else if (tokens[5] == "IOC") {
+      tif = TimeInForce::IOC;
+    } else if (tokens[5] == "FOK") {
       tif = TimeInForce::FOK;
     } else {
       tif = TimeInForce::DAY;
@@ -125,7 +122,7 @@ OrderEvent OrderEvent::from_csv(const std::string &line) {
 
     OrderEvent event(ts, order_id, side, ot, tif, price, quantity, peak_size);
     return event;
-  } else if (type == EventType:: : CANCEL_ORDER) {
+  } else if (type == EventType::CANCEL_ORDER) {
     return OrderEvent(ts, type, order_id);
   } else if (type == EventType::AMEND_ORDER) {
     bool has_new_price = (tokens[9] == "1");

@@ -1,5 +1,6 @@
 #include "order_book.hpp"
 #include <algorithm>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <set>
@@ -7,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-OrderBook::OrderBook() {}
+OrderBook::OrderBook() : logging_enabled_(false) {}
 
 std::vector<OrderBook::PriceLevel>
 OrderBook::get_bid_levels(int max_levels) const {
@@ -75,6 +76,10 @@ OrderBook::get_ask_levels(int max_levels) const {
 bool OrderBook::cancel_order(int order_id) {
   Timer timer;
   timer.start();
+
+  if (logging_enabled_) {
+    event_log_.emplace_back(Clock::now(), EventType::CANCEL_ORDER, order_id);
+  }
 
   // check if order exits and is active
   auto it = active_orders_.find(order_id);
@@ -244,6 +249,10 @@ bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
   Timer timer;
   timer.start();
 
+  if (logging_enabled_) {
+    event_log_.emplace_back(Clock::now(), order_id, new_price, new_quantity);
+  }
+
   // Check if order exists
   auto it = active_orders_.find(order_id);
   if (it == active_orders_.end()) {
@@ -376,6 +385,12 @@ void OrderBook::match_buy_order(Order &buy_order) {
 
       fills_.emplace_back(buy_order.id, best_ask.id, trade_price, trade_qty);
 
+      /// Log fill event
+      if (logging_enabled_) {
+        event_log_.emplace_back(Clock::now(), buy_order.id, best_ask.id,
+                                trade_price, trade_qty);
+      }
+
       buy_order.remaining_qty -= trade_qty;
       best_ask.remaining_qty -= trade_qty;
 
@@ -479,6 +494,12 @@ void OrderBook::match_sell_order(Order &sell_order) {
 
       fills_.emplace_back(best_bid.id, sell_order.id, trade_price, trade_qty);
 
+      // Log fill event
+      if (logging_enabled_) {
+        event_log_.emplace_back(Clock::now(), best_bid.id, sell_order.id,
+                                trade_price, trade_qty);
+      }
+
       sell_order.remaining_qty -= trade_qty;
       best_bid.remaining_qty -= trade_qty;
 
@@ -564,6 +585,17 @@ void OrderBook::add_order(Order o) {
   // Track the order
   active_orders_.insert({order.id, order});
 
+  if (logging_enabled_) {
+    if (order.is_iceberg()) {
+      event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
+                              order.tif, order.price, order.quantity,
+                              order.peak_size);
+    } else {
+      event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
+                              order.tif, order.price, order.quantity);
+    }
+  }
+
   if (order.side == Side::BUY) {
     match_buy_order(order);
   } else if (order.side == Side::SELL) {
@@ -581,6 +613,23 @@ void OrderBook::add_order(Order o) {
 
   timer.stop();
   insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
+}
+
+void OrderBook::save_events(const std::string &filename) const {
+  std::ofstream file(filename);
+  if (!file.is_open()) {
+    throw std::runtime_error("Could not open file: " + filename);
+  }
+
+  file << OrderEvent::csv_header() << "\n";
+
+  for (const auto &event : event_log_) {
+    file << event.to_csv() << "\n";
+  }
+
+  file.close();
+  std::cout << "Saved " << event_log_.size() << "events to " << filename
+            << std::endl;
 }
 
 std::optional<Order> OrderBook::get_best_bid() const {

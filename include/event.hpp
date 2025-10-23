@@ -13,7 +13,7 @@ enum class EventType {
 
 struct OrderEvent {
   TimePoint timestamp;
-  Eventype type;
+  EventType type;
   int order_id;
   Side side;
   OrderType order_type;
@@ -75,18 +75,23 @@ struct OrderEvent {
 
 inline std::string event_type_to_string(EventType type) {
   switch (type) {
-  case EventType::NEW_ORDER return "NEW";
-      case EventType::CANCEL_ORDER return "CANCEL";
-      case EventType::AMEND_ORDER return "AMEND";
-      case EventType::FILL return "FILL"; default:
-    return "UNKNOWN"
+  case EventType::NEW_ORDER:
+    return "NEW";
+  case EventType::CANCEL_ORDER:
+    return "CANCEL";
+  case EventType::AMEND_ORDER:
+    return "AMEND";
+  case EventType::FILL:
+    return "FILL";
+  default:
+    return "UNKNOWN";
   }
 }
 
 inline EventType string_to_event_type(const std::string &str) {
   if (str == "NEW")
-    return EvenType::NEW_ORDER;
-  if (std == "CANCEL")
+    return EventType::NEW_ORDER;
+  if (str == "CANCEL")
     return EventType::CANCEL_ORDER;
   if (str == "AMEND")
     return EventType::AMEND_ORDER;
