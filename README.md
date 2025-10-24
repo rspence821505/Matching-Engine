@@ -111,7 +111,6 @@ Typical performance on modern hardware:
 
 ## Future Enhancements
 
-- [ ] Stop orders
 - [ ] Multi-threaded order processing
 - [ ] Persistent order storage
 - [ ] Network interface (FIX protocol)

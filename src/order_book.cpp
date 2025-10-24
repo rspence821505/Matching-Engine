@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-OrderBook::OrderBook() : logging_enabled_(false) {}
+OrderBook::OrderBook() : logging_enabled_(false), last_trade_price_(0) {}
 
 std::vector<OrderBook::PriceLevel>
 OrderBook::get_bid_levels(int max_levels) const {
@@ -73,6 +73,58 @@ OrderBook::get_ask_levels(int max_levels) const {
 
   return levels;
 }
+
+void OrderBook::check_stop_triggers(double trade_price) {
+  last_trade_price_ = trade_price;
+
+  // Check buy stops (trigger when price rises to/above stop_price)
+  auto buy_it = stop_buys_.begin();
+  while (buy_it != stop_buys_.end()) {
+    if (trade_price >= buy_it->first) {
+      Order stop_order = buy_it->second;
+
+      // Remove from stop book
+      buy_it = stop_buys_.erase(buy_it);
+
+      // Trigger the stop order
+      stop_order.trigger_stop();
+
+      // Remove old state from active_orders
+      active_orders_.erase(stop_order.id);
+      // Re-submit as active order
+      add_order(stop_order);
+
+    } else {
+      break; // Stop prices are sorted, no more will trigger
+    }
+  }
+
+  // Check sell stops (trigger when price falls to/below stop_price)
+  auto sell_it = stop_sells_.rbegin();
+  while (sell_it != stop_sells_.rend()) {
+    if (trade_price <= sell_it->first) {
+      Order stop_order = sell_it->second;
+
+      // Convert reverse iterator to forward for erase
+      auto forward_it = std::next(sell_it).base();
+      stop_sells_.erase(forward_it);
+
+      // Trigger and execute
+      stop_order.trigger_stop();
+
+      // Remove old state form active_orders
+      active_orders_.erase(stop_order.id);
+      // Re-submit as active order
+      add_order(stop_order);
+
+      // Reset iterator after modification
+      sell_it = stop_sells_.rbegin();
+    } else {
+      ++sell_it;
+    }
+  }
+}
+
 bool OrderBook::cancel_order(int order_id) {
   Timer timer;
   timer.start();
@@ -391,6 +443,9 @@ void OrderBook::match_buy_order(Order &buy_order) {
                                 trade_price, trade_qty);
       }
 
+      // Check if this trade triggers and stops
+      check_stop_triggers(trade_price);
+
       buy_order.remaining_qty -= trade_qty;
       best_ask.remaining_qty -= trade_qty;
 
@@ -500,6 +555,9 @@ void OrderBook::match_sell_order(Order &sell_order) {
                                 trade_price, trade_qty);
       }
 
+      // Check if this trade triggers and stops
+      check_stop_triggers(trade_price);
+
       sell_order.remaining_qty -= trade_qty;
       best_bid.remaining_qty -= trade_qty;
 
@@ -580,8 +638,33 @@ void OrderBook::add_order(Order o) {
   timer.start();
 
   Order order = o;
-  order.state = OrderState::ACTIVE;
 
+  // Handle stop orders
+  if (order.is_stop && !order.stop_triggered) {
+    // Stop orders fo to pending lis, not active matching
+
+    order.state = OrderState::PENDING;
+    active_orders_.insert_or_assign(order.id, order);
+
+    if (order.side == Side::BUY) {
+      stop_buys_.insert({order.stop_price, order});
+      std::cout << "Stop-buy order " << order.id << " placed at &"
+                << order.stop_price << std::endl;
+    } else if (order.side == Side::SELL) {
+      stop_sells_.insert({order.stop_price, order});
+      std::cout << "Stop-sell order " << order.id << " placed at &"
+                << order.stop_price << std::endl;
+    } else {
+      throw std::runtime_error("Invalid order side");
+    }
+
+    timer.stop();
+    insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
+    return; // Don't match yet
+  }
+
+  // Regular orders (or triggered stops) proceed normally
+  order.state = OrderState::ACTIVE;
   active_orders_.insert({order.id, order});
 
   if (logging_enabled_) {
@@ -693,6 +776,35 @@ void OrderBook::print_top_of_book() const {
   } else {
     std::cout << "Spread: N/A" << std::endl;
   }
+  std::cout << std::endl;
+}
+
+void OrderBook::print_pending_stops() const {
+  std::cout << "\n=== Pending Stop Orders ===" << std::endl;
+
+  if (stop_buys_.empty() && stop_sells_.empty()) {
+    std::cout << "No pending stop orders." << std::endl;
+    return;
+  }
+
+  if (!stop_buys_.empty()) {
+    std::cout << "\nStop-Buy Orders (trigger at or above):" << std::endl;
+    for (const auto &[price, order] : stop_buys_) {
+      std::cout << "  $" << std::fixed << std::setprecision(2) << price
+                << " → Order #" << order.id << " (" << order.quantity
+                << " shares)" << std::endl;
+    }
+  }
+
+  if (!stop_sells_.empty()) {
+    std::cout << "\nStop-Sell Orders (trigger at or below):" << std::endl;
+    for (const auto &[price, order] : stop_sells_) {
+      std::cout << "  $" << std::fixed << std::setprecision(2) << price
+                << " → Order #" << order.id << " (" << order.quantity
+                << " shares)" << std::endl;
+    }
+  }
+
   std::cout << std::endl;
 }
 

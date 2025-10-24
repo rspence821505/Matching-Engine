@@ -1,53 +1,93 @@
 #include "order.hpp"
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
 
-// Constructor for LIMIT orders
+// Existing constructor for LIMIT orders - add stop initialization
 Order::Order(int id_, Side side_, double price_, int qty_, TimeInForce tif_)
     : id(id_), side(side_), type(OrderType::LIMIT), tif(tif_), price(price_),
-      quantity(qty_), remaining_qty(qty_),
-      display_qty(qty_), // Normal orders: all quanity visible
-      hidden_qty(0),     // No hidden quantity
-      peak_size(0),      // Not an iceberg
-      timestamp(Clock::now()), state(OrderState::PENDING) {}
+      quantity(qty_), remaining_qty(qty_), display_qty(qty_), hidden_qty(0),
+      peak_size(0), timestamp(Clock::now()), state(OrderState::PENDING),
+      is_stop(false), stop_price(0), stop_triggered(false), // NEW
+      stop_becomes(OrderType::LIMIT) {}                     // NEW
 
-// Constructor for MARKET Orders
+// Existing constructor for MARKET orders - add stop initialization
 Order::Order(int id_, Side side_, OrderType type_, int qty_, TimeInForce tif_)
     : id(id_), side(side_), type(type_), tif(tif_),
-      price(side == Side::BUY
-                ? std::numeric_limits<double>::infinity()
-                : 0.0), // Market buy = infinite price, market sell = 0 price
-      quantity(qty_), remaining_qty(qty_),
-      display_qty(qty_), // Market orders; all visible
-      hidden_qty(0), peak_size(0), timestamp(Clock::now()),
-      state(OrderState::PENDING) {
+      price(side == Side::BUY ? std::numeric_limits<double>::infinity() : 0.0),
+      quantity(qty_), remaining_qty(qty_), display_qty(qty_), hidden_qty(0),
+      peak_size(0), timestamp(Clock::now()), state(OrderState::PENDING),
+      is_stop(false), stop_price(0), stop_triggered(false), // NEW
+      stop_becomes(OrderType::MARKET) {                     // NEW
   if (type_ != OrderType::MARKET) {
     throw std::runtime_error("Use the other constructor for limit orders");
   }
-
-  // Market orders default to IOC if GTC specified
   if (tif == TimeInForce::GTC) {
     tif = TimeInForce::IOC;
   }
 }
 
-// Constructor for ICEBERG Orders
+// Existing constructor for ICEBERG - add stop initialization
 Order::Order(int id_, Side side_, double price_, int total_qty, int peak_size_,
              TimeInForce tif_)
     : id(id_), side(side_), type(OrderType::LIMIT), tif(tif_), price(price_),
       quantity(total_qty), remaining_qty(total_qty),
-      display_qty(std::min(peak_size_, total_qty)),    // show first peak
-      hidden_qty(std::max(0, total_qty - peak_size_)), // rest is hidden
-      peak_size(peak_size_),                           // Not an iceberg
-      timestamp(Clock::now()), state(OrderState::PENDING) {
+      display_qty(std::min(peak_size_, total_qty)),
+      hidden_qty(std::max(0, total_qty - peak_size_)), peak_size(peak_size_),
+      timestamp(Clock::now()), state(OrderState::PENDING), is_stop(false),
+      stop_price(0), stop_triggered(false), // NEW
+      stop_becomes(OrderType::LIMIT) {      // NEW
 
   if (peak_size_ <= 0) {
     throw std::runtime_error("Peak size must be positive");
   }
   if (peak_size_ > total_qty) {
-    // If peak >= total, it's just a regular order
     display_qty = total_qty;
     hidden_qty = 0;
     peak_size = 0;
   }
+}
+
+// Constructor for STOP-MARKET orders
+Order::Order(int id_, Side side_, double stop_price_, int qty_,
+             bool is_stop_market, TimeInForce tif_)
+    : id(id_), side(side_), type(OrderType::MARKET), tif(tif_),
+      price(side == Side::BUY ? std::numeric_limits<double>::infinity() : 0.0),
+      quantity(qty_), remaining_qty(qty_), display_qty(qty_), hidden_qty(0),
+      peak_size(0), timestamp(Clock::now()), state(OrderState::PENDING),
+      is_stop(true), stop_price(stop_price_), stop_triggered(false),
+      stop_becomes(OrderType::MARKET) {
+
+  if (!is_stop_market) {
+    throw std::runtime_error(
+        "Use this constructor only for stop-market orders");
+  }
+}
+
+// Constructor for STOP-LIMIT orders
+Order::Order(int id_, Side side_, double stop_price_, double limit_price_,
+             int qty_, TimeInForce tif_)
+    : id(id_), side(side_), type(OrderType::LIMIT), tif(tif_),
+      price(limit_price_), quantity(qty_), remaining_qty(qty_),
+      display_qty(qty_), hidden_qty(0), peak_size(0), timestamp(Clock::now()),
+      state(OrderState::PENDING), is_stop(true), stop_price(stop_price_),
+      stop_triggered(false), stop_becomes(OrderType::LIMIT) {}
+
+// Trigger the stop order
+void Order::trigger_stop() {
+  if (!is_stop || stop_triggered) {
+    return; // Already triggered or not a stop
+  }
+
+  stop_triggered = true;
+  state = OrderState::ACTIVE;
+  timestamp = Clock::now(); // New timestamp when triggered
+  type = stop_becomes;      // Becomes MARKET or LIMIT
+
+  std::cout << "Stop order " << id << " triggered at $" << std::fixed
+            << std::setprecision(2) << stop_price << " → "
+            << (type == OrderType::MARKET ? "MARKET" : "LIMIT") << " "
+            << side_to_string() << std::endl;
 }
 
 bool Order::is_filled() const {
@@ -129,14 +169,34 @@ std::string Order::state_to_string() const {
 }
 
 std::ostream &operator<<(std::ostream &os, const Order &o) {
-  os << "Order{id=" << o.id << ", type=" << o.type_to_string()
-     << ", side=" << o.side_to_string() << ", tif=" << o.tif_to_string()
-     << ", price=";
+  os << "Order{id=" << o.id;
 
-  if (o.is_market_order()) {
-    os << "MARKET";
+  // Show if it's a stop order
+  if (o.is_stop && !o.stop_triggered) {
+    os << ", type=STOP-"
+       << (o.stop_becomes == OrderType::MARKET ? "MARKET" : "LIMIT");
   } else {
-    os << o.price;
+    os << ", type=" << o.type_to_string();
+  }
+
+  os << ", side=" << o.side_to_string() << ", tif=" << o.tif_to_string();
+
+  // Show stop price if applicable
+  if (o.is_stop) {
+    os << ", stop_price=" << std::fixed << std::setprecision(2) << o.stop_price;
+    if (o.stop_triggered) {
+      os << " (TRIGGERED)";
+    }
+  }
+
+  os << ", price=";
+
+  if (o.is_market_order() && !o.is_stop) {
+    os << "MARKET";
+  } else if (o.type == OrderType::LIMIT) {
+    os << std::fixed << std::setprecision(2) << o.price;
+  } else {
+    os << "MARKET";
   }
 
   os << ", qty=" << o.remaining_qty << "/" << o.quantity;
@@ -150,18 +210,4 @@ std::ostream &operator<<(std::ostream &os, const Order &o) {
   os << ", state=" << o.state_to_string()
      << ", ts=" << o.timestamp.time_since_epoch().count() << "}";
   return os;
-}
-
-bool BidComparator::operator()(const Order &a, const Order &b) const {
-  if (a.price != b.price) {
-    return a.price < b.price;
-  }
-  return a.timestamp > b.timestamp;
-}
-
-bool AskComparator::operator()(const Order &a, const Order &b) const {
-  if (a.price != b.price) {
-    return a.price > b.price;
-  }
-  return a.timestamp > b.timestamp;
 }

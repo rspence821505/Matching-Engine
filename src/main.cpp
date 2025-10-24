@@ -1,67 +1,72 @@
-
 #include "order_book.hpp"
-#include "replay_engine.hpp"
 #include <iostream>
 #include <string>
 
 int main() {
-  std::cout << "=== Trade Replay System ===" << std::endl << std::endl;
-
-  // Phase 1: Record session
-  std::cout << "PHASE 1: Recording trading session..." << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
+  std::cout << "=== Stop Orders ===" << std::endl << std::endl;
 
   OrderBook book;
-  book.enable_logging(); // Enable event logging
 
-  // Execute some trades
+  // Test 1: Build initial book
+  std::cout << "Test 1: Building initial book around $100" << std::endl;
   book.add_order(Order{1, Side::BUY, 100.00, 200});
-  book.add_order(Order{2, Side::BUY, 99.75, 300});
+  book.add_order(Order{2, Side::BUY, 99.50, 300});
   book.add_order(Order{3, Side::SELL, 101.00, 150});
-  book.add_order(Order{4, Side::SELL, 100.75, 200});
+  book.add_order(Order{4, Side::SELL, 100.50, 200});
+  book.print_market_depth(5);
 
-  // Add iceberg
-  book.add_order(Order{5, Side::SELL, 100.50, 500, 100});
+  // Test 2: Place stop-loss orders (sell stops below market)
+  std::cout << "\nTest 2: Placing stop-loss SELL orders" << std::endl;
+  book.add_order(Order{5, Side::SELL, 98.00, 100, true}); // Stop-market @ $98
+  book.add_order(Order{6, Side::SELL, 97.00, 95.00, 150,
+                       TimeInForce::GTC}); // Stop-limit @ $97 → $95
+  book.print_pending_stops();
 
-  // Aggressive order
-  book.add_order(Order{6, Side::BUY, 101.00, 250});
+  // Test 3: Place stop-buy orders (buy stops above market)
+  std::cout << "\nTest 3: Placing stop-buy BUY orders" << std::endl;
+  book.add_order(Order{7, Side::BUY, 102.00, 120, true}); // Stop-market @ $102
+  book.add_order(Order{8, Side::BUY, 103.00, 105.00, 100,
+                       TimeInForce::GTC}); // Stop-limit @ $103 → $105
+  book.print_pending_stops();
 
-  // Cancel and amend
-  book.cancel_order(3);
-  book.amend_order(4, 100.50, std::nullopt);
+  // Test 4: Price rises - trigger stop-buy
+  std::cout << "\nTest 4: Aggressive SELL pushes price up (trigger stop-buy)"
+            << std::endl;
+  book.add_order(Order{9, Side::SELL, 102.50, 250}); // This will trade at $102+
+  book.print_fills();
+  book.print_pending_stops();
+  book.print_market_depth_compact();
 
-  // More trading
-  book.add_order(Order{7, Side::BUY, OrderType::MARKET, 100});
+  // Test 5: Price falls - trigger stop-loss
+  std::cout << "\nTest 5: Aggressive BUY pushes price down (trigger stop-loss)"
+            << std::endl;
+  book.add_order(Order{10, Side::BUY, 97.50, 200}); // This will trade at $98-
+  book.print_fills();
+  book.print_pending_stops();
+  book.print_market_depth_compact();
 
-  std::cout << "\n";
+  // Test 6: Cascading stops (stop spiral)
+  std::cout << "\nTest 6: Test cascading stop triggers" << std::endl;
+  book.add_order(Order{11, Side::SELL, 96.50, 100, true}); // Stop @ $96.50
+  book.add_order(Order{12, Side::SELL, 96.00, 100, true}); // Stop @ $96.00
+  book.add_order(Order{13, Side::SELL, 95.50, 100, true}); // Stop @ $95.50
+
+  std::cout << "\nBefore cascade:" << std::endl;
+  book.print_pending_stops();
+
+  // Trigger cascade
+  book.add_order(Order{14, Side::BUY, 96.40, 50});
+
+  std::cout << "\nAfter cascade:" << std::endl;
+  book.print_fills();
+  book.print_pending_stops();
+
+  // Final statistics
+  std::cout << "\n" << std::string(60, '=') << std::endl;
+  std::cout << "FINAL REPORT" << std::endl;
+  std::cout << std::string(60, '=') << std::endl;
   book.print_match_stats();
-
-  // Save original fills for validation
-  auto original_fills = book.get_fills();
-
-  // Save events to file
-  book.save_events("trading_session.csv");
-
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 2: Replaying trading session..." << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  // Phase 2: Replay instant
-  ReplayEngine replay;
-  replay.load_from_file("trading_session.csv");
-  replay.replay_instant();
-
-  // Validate
-  replay.validate_against_original(original_fills);
-
-  // Phase 3: Timed replay
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 3: Timed replay at 1000x speed..." << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  ReplayEngine timed_replay;
-  timed_replay.load_from_file("trading_session.csv");
-  timed_replay.replay_timed(1000.0);
+  std::cout << "Pending stops: " << book.pending_stop_count() << std::endl;
 
   return 0;
 }

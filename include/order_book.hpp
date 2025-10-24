@@ -15,16 +15,23 @@ class OrderBook {
 private:
   std::priority_queue<Order, std::vector<Order>, BidComparator> bids_;
   std::priority_queue<Order, std::vector<Order>, AskComparator> asks_;
-  std::vector<Fill> fills_;
-  std::vector<long long> insertion_latencies_ns_;
-
-  // Order tracking for cancellation and amendment
   std::unordered_map<int, Order> active_orders_;    // id -> order
   std::unordered_map<int, Order> cancelled_orders_; // id -> order
+  std::vector<Fill> fills_;
+  std::vector<long long> insertion_latencies_ns_;
 
   void match_buy_order(Order &buy_order);
   void match_sell_order(Order &sell_order);
   bool can_fill_order(const Order &order) const;
+
+  // Event logging
+  std::vector<OrderEvent> event_log_;
+  bool logging_enabled_;
+
+  // Stop orders storage (sorted by stop price)
+  std::multimap<double, Order> stop_buys_;  // Buy stops: trigger at or above
+  std::multimap<double, Order> stop_sells_; // Sell stops: trigger at or below
+  double last_trade_price_;
 
   struct PriceLevel {
     double price;
@@ -34,10 +41,6 @@ private:
 
   std::vector<PriceLevel> get_bid_levels(int max_levels) const;
   std::vector<PriceLevel> get_ask_levels(int max_levels) const;
-
-  // Event logging
-  std::vector<OrderEvent> event_log_;
-  bool logging_enabled_;
 
 public:
   OrderBook();
@@ -54,6 +57,7 @@ public:
   bool amend_order(int order_id, std::optional<double> new_price,
                    std::optional<int> new_quantity);
   std::optional<Order> get_order(int order_id) const;
+  void check_stop_triggers(double trade_price);
 
   // Event logging control
   void enable_logging() { logging_enabled_ = true; }
@@ -79,9 +83,13 @@ public:
   void print_order_status(int order_id) const;
   void print_market_depth(int levels) const;
   void print_market_depth_compact() const;
+  void print_pending_stops() const;
 
   size_t bids_size() const { return bids_.size(); }
   size_t asks_size() const { return asks_.size(); }
+  size_t pending_stop_count() const {
+    return stop_buys_.size() + stop_sells_.size();
+  }
 };
 
 #endif // ORDER_BOOK_HPP
