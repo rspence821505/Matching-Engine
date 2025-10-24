@@ -8,123 +8,87 @@
 #include <stdexcept>
 #include <string>
 
+// ============================================================================
+// CONSTRUCTOR
+// ============================================================================
+
 OrderBook::OrderBook()
     : logging_enabled_(false), last_trade_price_(0), snapshot_counter_(0) {}
 
-std::vector<OrderBook::PriceLevel>
-OrderBook::get_bid_levels(int max_levels) const {
-  std::vector<PriceLevel> levels;
+// ============================================================================
+//  CORE ORDER OPERATIONS
+// ============================================================================
 
-  if (bids_.empty()) {
-    return levels;
-  }
+void OrderBook::add_order(Order o) {
+  Timer timer;
+  timer.start();
 
-  auto bids_copy = bids_;
-  std::map<double, std::pair<int, int>> price_map;
+  Order order = o;
 
-  while (!bids_copy.empty()) {
-    Order order = bids_copy.top();
-    bids_copy.pop();
+  // Handle stop orders
+  if (order.is_stop && !order.stop_triggered) {
+    // Stop orders fo to pending lis, not active matching
 
-    price_map[order.price].first += order.remaining_qty;
-    price_map[order.price].second += 1;
-  }
+    order.state = OrderState::PENDING;
+    active_orders_.insert_or_assign(order.id, order);
 
-  int count = 0;
-  for (auto it = price_map.rbegin();
-       it != price_map.rend() && count < max_levels; ++it, ++count) {
-    PriceLevel level;
-    level.price = it->first;
-    level.total_quantity = it->second.first;
-    level.num_orders = it->second.second;
-    levels.push_back(level);
-  }
-
-  return levels;
-}
-
-std::vector<OrderBook::PriceLevel>
-OrderBook::get_ask_levels(int max_levels) const {
-  std::vector<PriceLevel> levels;
-
-  if (asks_.empty()) {
-    return levels;
-  }
-
-  auto asks_copy = asks_;
-  std::map<double, std::pair<int, int>> price_map;
-
-  while (!asks_copy.empty()) {
-    Order order = asks_copy.top();
-    asks_copy.pop();
-
-    price_map[order.price].first += order.remaining_qty;
-    price_map[order.price].second += 1;
-  }
-
-  int count = 0;
-  for (auto it = price_map.begin(); it != price_map.end() && count < max_levels;
-       ++it, ++count) {
-    PriceLevel level;
-    level.price = it->first;
-    level.total_quantity = it->second.first;
-    level.num_orders = it->second.second;
-    levels.push_back(level);
-  }
-
-  return levels;
-}
-
-void OrderBook::check_stop_triggers(double trade_price) {
-  last_trade_price_ = trade_price;
-
-  // Check buy stops (trigger when price rises to/above stop_price)
-  auto buy_it = stop_buys_.begin();
-  while (buy_it != stop_buys_.end()) {
-    if (trade_price >= buy_it->first) {
-      Order stop_order = buy_it->second;
-
-      // Remove from stop book
-      buy_it = stop_buys_.erase(buy_it);
-
-      // Trigger the stop order
-      stop_order.trigger_stop();
-
-      // Remove old state from active_orders
-      active_orders_.erase(stop_order.id);
-      // Re-submit as active order
-      add_order(stop_order);
-
+    if (order.side == Side::BUY) {
+      stop_buys_.insert({order.stop_price, order});
+      std::cout << "Stop-buy order " << order.id << " placed at &"
+                << order.stop_price << std::endl;
+    } else if (order.side == Side::SELL) {
+      stop_sells_.insert({order.stop_price, order});
+      std::cout << "Stop-sell order " << order.id << " placed at &"
+                << order.stop_price << std::endl;
     } else {
-      break; // Stop prices are sorted, no more will trigger
+      throw std::runtime_error("Invalid order side");
+    }
+
+    timer.stop();
+    insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
+    return; // Don't match yet
+  }
+
+  // Regular orders (or triggered stops) proceed normally
+  order.state = OrderState::ACTIVE;
+  active_orders_.insert({order.id, order});
+
+  if (logging_enabled_) {
+    // Handle market orders with infinite price properly
+    double log_price = order.is_market_order() ? 0.0 : order.price;
+
+    if (order.is_iceberg()) {
+      event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
+                              order.tif, log_price, order.quantity,
+                              order.peak_size);
+    } else {
+      event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
+                              order.tif, log_price, order.quantity);
     }
   }
 
-  // Check sell stops (trigger when price falls to/below stop_price)
-  auto sell_it = stop_sells_.rbegin();
-  while (sell_it != stop_sells_.rend()) {
-    if (trade_price <= sell_it->first) {
-      Order stop_order = sell_it->second;
-
-      // Convert reverse iterator to forward for erase
-      auto forward_it = std::next(sell_it).base();
-      stop_sells_.erase(forward_it);
-
-      // Trigger and execute
-      stop_order.trigger_stop();
-
-      // Remove old state form active_orders
-      active_orders_.erase(stop_order.id);
-      // Re-submit as active order
-      add_order(stop_order);
-
-      // Reset iterator after modification
-      sell_it = stop_sells_.rbegin();
-    } else {
-      ++sell_it;
-    }
+  if (order.side == Side::BUY) {
+    match_buy_order(order);
+  } else if (order.side == Side::SELL) {
+    match_sell_order(order);
+  } else {
+    throw std::runtime_error("Invalid order side");
   }
+
+  // Update order state after matching
+  if (order.is_filled()) {
+    active_orders_.at(order.id).state = OrderState::FILLED;
+  } else if (order.remaining_qty < order.quantity) {
+    active_orders_.at(order.id).state = OrderState::PARTIALLY_FILLED;
+  }
+
+  timer.stop();
+  insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
 }
+
+// ============================================================================
+// ORDER LIFECYCLE MANAGEMENT
+// ============================================================================
 
 bool OrderBook::cancel_order(int order_id) {
   Timer timer;
@@ -162,139 +126,6 @@ bool OrderBook::cancel_order(int order_id) {
             << " (latency: " << timer.elapsed_nanoseconds() << " ns)" << '\n';
 
   return true;
-}
-
-void OrderBook::print_market_depth(int levels) const {
-  auto bid_levels = get_bid_levels(levels);
-  auto ask_levels = get_ask_levels(levels);
-
-  std::cout << "\n=== Market Depth (" << levels << " levels) ===" << std::endl;
-  std::cout << std::string(70, '=') << std::endl;
-
-  // Header
-  std::cout << std::setw(25) << std::right << "BIDS"
-            << " | " << std::setw(10) << "PRICE"
-            << " | " << std::setw(25) << std::left << "ASKS" << std::endl;
-  std::cout << std::string(70, '-') << std::endl;
-
-  // Determine how many rows to display
-  size_t max_rows = std::max(bid_levels.size(), ask_levels.size());
-
-  // Calculate totals
-  int total_bid_qty = 0;
-  int total_ask_qty = 0;
-  for (const auto &level : bid_levels)
-    total_bid_qty += level.total_quantity;
-  for (const auto &level : ask_levels)
-    total_ask_qty += level.total_quantity;
-
-  // Display rows (asks in reverse order - highest first)
-  for (size_t i = 0; i < max_rows; ++i) {
-    // Determine indices
-    size_t ask_idx =
-        (ask_levels.size() > i) ? (ask_levels.size() - 1 - i) : SIZE_MAX;
-    size_t bid_idx = i;
-
-    // Format bid side
-    std::ostringstream bid_str;
-    if (bid_idx < bid_levels.size()) {
-      bid_str << bid_levels[bid_idx].total_quantity << " ("
-              << bid_levels[bid_idx].num_orders << " order";
-      if (bid_levels[bid_idx].num_orders > 1)
-        bid_str << "s";
-      bid_str << ")";
-    }
-
-    // Format price
-    std::ostringstream price_str;
-    if (ask_idx != SIZE_MAX && ask_idx < ask_levels.size()) {
-      price_str << std::fixed << std::setprecision(2) << "$"
-                << ask_levels[ask_idx].price;
-    } else if (bid_idx < bid_levels.size()) {
-      price_str << std::fixed << std::setprecision(2) << "$"
-                << bid_levels[bid_idx].price;
-    }
-
-    // Format ask side
-    std::ostringstream ask_str;
-    if (ask_idx != SIZE_MAX && ask_idx < ask_levels.size()) {
-      ask_str << ask_levels[ask_idx].total_quantity << " ("
-              << ask_levels[ask_idx].num_orders << " order";
-      if (ask_levels[ask_idx].num_orders > 1)
-        ask_str << "s";
-      ask_str << ")";
-    }
-
-    // Print row
-    std::cout << std::setw(25) << std::right << bid_str.str() << " | "
-              << std::setw(10) << std::left << price_str.str() << " | "
-              << std::setw(25) << std::left << ask_str.str() << std::endl;
-  }
-
-  // Footer with totals
-  std::cout << std::string(70, '-') << std::endl;
-  std::cout << std::setw(25) << std::right
-            << ("Total: " + std::to_string(total_bid_qty) + " shares") << " | "
-            << std::setw(10) << " "
-            << " | " << std::setw(25) << std::left
-            << ("Total: " + std::to_string(total_ask_qty) + " shares")
-            << std::endl;
-  std::cout << std::string(70, '=') << std::endl;
-
-  // Additional stats
-  auto spread = get_spread();
-  if (spread) {
-    double spread_bps = (*spread / bid_levels[0].price) * 10000;
-    std::cout << "Spread: $" << std::fixed << std::setprecision(4) << *spread
-              << " (" << std::fixed << std::setprecision(2) << spread_bps
-              << " bps)" << std::endl;
-  }
-  std::cout << std::endl;
-}
-
-void OrderBook::print_market_depth_compact() const {
-  auto bid_levels = get_bid_levels(10); // Get more levels for compact view
-  auto ask_levels = get_ask_levels(10);
-
-  std::cout << "\n=== Order Book (Compact) ===" << std::endl;
-
-  // Print asks (top to bottom)
-  std::cout << "\n ASKS (sellers):" << std::endl;
-  if (ask_levels.empty()) {
-    std::cout << "  (no asks)" << std::endl;
-  } else {
-    for (auto it = ask_levels.rbegin(); it != ask_levels.rend(); ++it) {
-      std::cout << "  $" << std::fixed << std::setprecision(2) << std::setw(8)
-                << it->price << "  │ " << std::setw(6) << it->total_quantity
-                << " (" << it->num_orders << ")" << std::endl;
-    }
-  }
-
-  // Spread line
-  auto spread = get_spread();
-  if (spread) {
-    std::cout << std::string(30, '-') << std::endl;
-    std::cout << "  Spread: $" << std::fixed << std::setprecision(4) << *spread
-              << std::endl;
-    std::cout << std::string(30, '-') << std::endl;
-  } else {
-    std::cout << std::string(30, '-') << std::endl;
-    std::cout << "  (crossed or one-sided)" << std::endl;
-    std::cout << std::string(30, '-') << std::endl;
-  }
-
-  // Print bids (top to bottom)
-  std::cout << "\n BIDS (buyers):" << std::endl;
-  if (bid_levels.empty()) {
-    std::cout << "  (no bids)" << std::endl;
-  } else {
-    for (const auto &level : bid_levels) {
-      std::cout << "  $" << std::fixed << std::setprecision(2) << std::setw(8)
-                << level.price << "  │ " << std::setw(6) << level.total_quantity
-                << " (" << level.num_orders << ")" << std::endl;
-    }
-  }
-  std::cout << std::endl;
 }
 
 bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
@@ -365,15 +196,9 @@ std::optional<Order> OrderBook::get_order(int order_id) const {
   return std::nullopt;
 }
 
-void OrderBook::print_order_status(int order_id) const {
-  auto order = get_order(order_id);
-  if (order) {
-    std::cout << "\n=== Order Status ===" << std::endl;
-    std::cout << *order << std::endl;
-  } else {
-    std::cout << "Order " << order_id << " not found." << std::endl;
-  }
-}
+// ============================================================================
+//   MATCHING ENGINE CORE
+// ============================================================================
 
 bool OrderBook::can_fill_order(const Order &order) const {
   int available_qty = 0;
@@ -634,89 +459,64 @@ void OrderBook::match_sell_order(Order &sell_order) {
   }
 }
 
-void OrderBook::add_order(Order o) {
-  Timer timer;
-  timer.start();
+// ============================================================================
+// STOP ORDER MANAGEMENT
+// ============================================================================
 
-  Order order = o;
+void OrderBook::check_stop_triggers(double trade_price) {
+  last_trade_price_ = trade_price;
 
-  // Handle stop orders
-  if (order.is_stop && !order.stop_triggered) {
-    // Stop orders fo to pending lis, not active matching
+  // Check buy stops (trigger when price rises to/above stop_price)
+  auto buy_it = stop_buys_.begin();
+  while (buy_it != stop_buys_.end()) {
+    if (trade_price >= buy_it->first) {
+      Order stop_order = buy_it->second;
 
-    order.state = OrderState::PENDING;
-    active_orders_.insert_or_assign(order.id, order);
+      // Remove from stop book
+      buy_it = stop_buys_.erase(buy_it);
 
-    if (order.side == Side::BUY) {
-      stop_buys_.insert({order.stop_price, order});
-      std::cout << "Stop-buy order " << order.id << " placed at &"
-                << order.stop_price << std::endl;
-    } else if (order.side == Side::SELL) {
-      stop_sells_.insert({order.stop_price, order});
-      std::cout << "Stop-sell order " << order.id << " placed at &"
-                << order.stop_price << std::endl;
+      // Trigger the stop order
+      stop_order.trigger_stop();
+
+      // Remove old state from active_orders
+      active_orders_.erase(stop_order.id);
+      // Re-submit as active order
+      add_order(stop_order);
+
     } else {
-      throw std::runtime_error("Invalid order side");
-    }
-
-    timer.stop();
-    insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
-    return; // Don't match yet
-  }
-
-  // Regular orders (or triggered stops) proceed normally
-  order.state = OrderState::ACTIVE;
-  active_orders_.insert({order.id, order});
-
-  if (logging_enabled_) {
-    // Handle market orders with infinite price properly
-    double log_price = order.is_market_order() ? 0.0 : order.price;
-
-    if (order.is_iceberg()) {
-      event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
-                              order.tif, log_price, order.quantity,
-                              order.peak_size);
-    } else {
-      event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
-                              order.tif, log_price, order.quantity);
+      break; // Stop prices are sorted, no more will trigger
     }
   }
 
-  if (order.side == Side::BUY) {
-    match_buy_order(order);
-  } else if (order.side == Side::SELL) {
-    match_sell_order(order);
-  } else {
-    throw std::runtime_error("Invalid order side");
-  }
+  // Check sell stops (trigger when price falls to/below stop_price)
+  auto sell_it = stop_sells_.rbegin();
+  while (sell_it != stop_sells_.rend()) {
+    if (trade_price <= sell_it->first) {
+      Order stop_order = sell_it->second;
 
-  // Update order state after matching
-  if (order.is_filled()) {
-    active_orders_.at(order.id).state = OrderState::FILLED;
-  } else if (order.remaining_qty < order.quantity) {
-    active_orders_.at(order.id).state = OrderState::PARTIALLY_FILLED;
-  }
+      // Convert reverse iterator to forward for erase
+      auto forward_it = std::next(sell_it).base();
+      stop_sells_.erase(forward_it);
 
-  timer.stop();
-  insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
+      // Trigger and execute
+      stop_order.trigger_stop();
+
+      // Remove old state form active_orders
+      active_orders_.erase(stop_order.id);
+      // Re-submit as active order
+      add_order(stop_order);
+
+      // Reset iterator after modification
+      sell_it = stop_sells_.rbegin();
+    } else {
+      ++sell_it;
+    }
+  }
 }
 
-void OrderBook::save_events(const std::string &filename) const {
-  std::ofstream file(filename);
-  if (!file.is_open()) {
-    throw std::runtime_error("Could not open file: " + filename);
-  }
-
-  file << OrderEvent::csv_header() << "\n";
-
-  for (const auto &event : event_log_) {
-    file << event.to_csv() << "\n";
-  }
-
-  file.close();
-  std::cout << "Saved " << event_log_.size() << "events to " << filename
-            << std::endl;
-}
+// ============================================================================
+//  MARKET DATA ACCESSORS
+// ============================================================================
 
 std::optional<Order> OrderBook::get_best_bid() const {
   if (bids_.empty()) {
@@ -740,6 +540,74 @@ std::optional<double> OrderBook::get_spread() const {
 }
 
 const std::vector<Fill> &OrderBook::get_fills() const { return fills_; }
+
+std::vector<OrderBook::PriceLevel>
+OrderBook::get_bid_levels(int max_levels) const {
+  std::vector<PriceLevel> levels;
+
+  if (bids_.empty()) {
+    return levels;
+  }
+
+  auto bids_copy = bids_;
+  std::map<double, std::pair<int, int>> price_map;
+
+  while (!bids_copy.empty()) {
+    Order order = bids_copy.top();
+    bids_copy.pop();
+
+    price_map[order.price].first += order.remaining_qty;
+    price_map[order.price].second += 1;
+  }
+
+  int count = 0;
+  for (auto it = price_map.rbegin();
+       it != price_map.rend() && count < max_levels; ++it, ++count) {
+    PriceLevel level;
+    level.price = it->first;
+    level.total_quantity = it->second.first;
+    level.num_orders = it->second.second;
+    levels.push_back(level);
+  }
+
+  return levels;
+}
+
+std::vector<OrderBook::PriceLevel>
+OrderBook::get_ask_levels(int max_levels) const {
+  std::vector<PriceLevel> levels;
+
+  if (asks_.empty()) {
+    return levels;
+  }
+
+  auto asks_copy = asks_;
+  std::map<double, std::pair<int, int>> price_map;
+
+  while (!asks_copy.empty()) {
+    Order order = asks_copy.top();
+    asks_copy.pop();
+
+    price_map[order.price].first += order.remaining_qty;
+    price_map[order.price].second += 1;
+  }
+
+  int count = 0;
+  for (auto it = price_map.begin(); it != price_map.end() && count < max_levels;
+       ++it, ++count) {
+    PriceLevel level;
+    level.price = it->first;
+    level.total_quantity = it->second.first;
+    level.num_orders = it->second.second;
+    levels.push_back(level);
+  }
+
+  return levels;
+}
+
+// ============================================================================
+//  STATISTICS & DISPLAY METHODS
+// ============================================================================
 
 void OrderBook::print_fills() const {
   std::cout << "\n=== Fills Generated ===" << std::endl;
@@ -780,6 +648,192 @@ void OrderBook::print_top_of_book() const {
   std::cout << std::endl;
 }
 
+void OrderBook::print_book_summary() const {
+  std::cout << "\n=== Current Book State ===" << std::endl;
+
+  std::cout << "Orders in book: " << (bids_.size() + asks_.size()) << std::endl;
+  std::cout << "  Bids: " << bids_.size() << std::endl;
+  std::cout << "  Asks: " << asks_.size() << std::endl;
+
+  auto best_bid = get_best_bid();
+  auto best_ask = get_best_ask();
+  auto spread = get_spread();
+
+  if (best_bid && best_ask) {
+    std::cout << "\nTop of Book:" << std::endl;
+    std::cout << "  Best Bid: $" << std::fixed << std::setprecision(2)
+              << best_bid->price << " (" << best_bid->remaining_qty
+              << " shares)" << std::endl;
+    std::cout << "  Best Ask: $" << std::fixed << std::setprecision(2)
+              << best_ask->price << " (" << best_ask->remaining_qty
+              << " shares)" << std::endl;
+    std::cout << "  Spread: $" << std::fixed << std::setprecision(4) << *spread;
+
+    if (*spread < 0) {
+      std::cout << "CROSSED BOOK!" << std::endl;
+    } else if (*spread == 0) {
+      std::cout << " (locked)" << std::endl;
+    } else if (*spread < 0.10) {
+      std::cout << " (tight)" << std::endl;
+    } else {
+      std::cout << " (wide)" << std::endl;
+    }
+  } else if (best_bid) {
+    std::cout << "\nBid-only market:" << std::endl;
+    std::cout << "  Best Bid: $" << best_bid->price << std::endl;
+    std::cout << "  No asks available" << std::endl;
+  } else if (best_ask) {
+    std::cout << "\nAsk-only market:" << std::endl;
+    std::cout << "  Best Ask: $" << best_ask->price << std::endl;
+    std::cout << "  No bids available" << std::endl;
+  } else {
+    std::cout << "\nEmpty book (no orders)" << std::endl;
+  }
+}
+
+void OrderBook::print_market_depth(int levels) const {
+  auto bid_levels = get_bid_levels(levels);
+  auto ask_levels = get_ask_levels(levels);
+
+  std::cout << "\n=== Market Depth (" << levels << " levels) ===" << std::endl;
+  std::cout << std::string(70, '=') << std::endl;
+
+  // Header
+  std::cout << std::setw(25) << std::right << "BIDS"
+            << " | " << std::setw(10) << "PRICE"
+            << " | " << std::setw(25) << std::left << "ASKS" << std::endl;
+  std::cout << std::string(70, '-') << std::endl;
+
+  // Determine how many rows to display
+  size_t max_rows = std::max(bid_levels.size(), ask_levels.size());
+
+  // Calculate totals
+  int total_bid_qty = 0;
+  int total_ask_qty = 0;
+  for (const auto &level : bid_levels)
+    total_bid_qty += level.total_quantity;
+  for (const auto &level : ask_levels)
+    total_ask_qty += level.total_quantity;
+
+  // Display rows (asks in reverse order - highest first)
+  for (size_t i = 0; i < max_rows; ++i) {
+    // Determine indices
+    size_t ask_idx =
+        (ask_levels.size() > i) ? (ask_levels.size() - 1 - i) : SIZE_MAX;
+    size_t bid_idx = i;
+
+    // Format bid side
+    std::ostringstream bid_str;
+    if (bid_idx < bid_levels.size()) {
+      bid_str << bid_levels[bid_idx].total_quantity << " ("
+              << bid_levels[bid_idx].num_orders << " order";
+      if (bid_levels[bid_idx].num_orders > 1)
+        bid_str << "s";
+      bid_str << ")";
+    }
+
+    // Format price
+    std::ostringstream price_str;
+    if (ask_idx != SIZE_MAX && ask_idx < ask_levels.size()) {
+      price_str << std::fixed << std::setprecision(2) << "$"
+                << ask_levels[ask_idx].price;
+    } else if (bid_idx < bid_levels.size()) {
+      price_str << std::fixed << std::setprecision(2) << "$"
+                << bid_levels[bid_idx].price;
+    }
+
+    // Format ask side
+    std::ostringstream ask_str;
+    if (ask_idx != SIZE_MAX && ask_idx < ask_levels.size()) {
+      ask_str << ask_levels[ask_idx].total_quantity << " ("
+              << ask_levels[ask_idx].num_orders << " order";
+      if (ask_levels[ask_idx].num_orders > 1)
+        ask_str << "s";
+      ask_str << ")";
+    }
+
+    // Print row
+    std::cout << std::setw(25) << std::right << bid_str.str() << " | "
+              << std::setw(10) << std::left << price_str.str() << " | "
+              << std::setw(25) << std::left << ask_str.str() << std::endl;
+  }
+
+  // Footer with totals
+  std::cout << std::string(70, '-') << std::endl;
+  std::cout << std::setw(25) << std::right
+            << ("Total: " + std::to_string(total_bid_qty) + " shares") << " | "
+            << std::setw(10) << " "
+            << " | " << std::setw(25) << std::left
+            << ("Total: " + std::to_string(total_ask_qty) + " shares")
+            << std::endl;
+  std::cout << std::string(70, '=') << std::endl;
+
+  // Additional stats
+  auto spread = get_spread();
+  if (spread) {
+    double spread_bps = (*spread / bid_levels[0].price) * 10000;
+    std::cout << "Spread: $" << std::fixed << std::setprecision(4) << *spread
+              << " (" << std::fixed << std::setprecision(2) << spread_bps
+              << " bps)" << std::endl;
+  }
+  std::cout << std::endl;
+}
+
+void OrderBook::print_market_depth_compact() const {
+  auto bid_levels = get_bid_levels(10); // Get more levels for compact view
+  auto ask_levels = get_ask_levels(10);
+
+  std::cout << "\n=== Order Book (Compact) ===" << std::endl;
+
+  // Print asks (top to bottom)
+  std::cout << "\n ASKS (sellers):" << std::endl;
+  if (ask_levels.empty()) {
+    std::cout << "  (no asks)" << std::endl;
+  } else {
+    for (auto it = ask_levels.rbegin(); it != ask_levels.rend(); ++it) {
+      std::cout << "  $" << std::fixed << std::setprecision(2) << std::setw(8)
+                << it->price << "  │ " << std::setw(6) << it->total_quantity
+                << " (" << it->num_orders << ")" << std::endl;
+    }
+  }
+
+  // Spread line
+  auto spread = get_spread();
+  if (spread) {
+    std::cout << std::string(30, '-') << std::endl;
+    std::cout << "  Spread: $" << std::fixed << std::setprecision(4) << *spread
+              << std::endl;
+    std::cout << std::string(30, '-') << std::endl;
+  } else {
+    std::cout << std::string(30, '-') << std::endl;
+    std::cout << "  (crossed or one-sided)" << std::endl;
+    std::cout << std::string(30, '-') << std::endl;
+  }
+
+  // Print bids (top to bottom)
+  std::cout << "\n BIDS (buyers):" << std::endl;
+  if (bid_levels.empty()) {
+    std::cout << "  (no bids)" << std::endl;
+  } else {
+    for (const auto &level : bid_levels) {
+      std::cout << "  $" << std::fixed << std::setprecision(2) << std::setw(8)
+                << level.price << "  │ " << std::setw(6) << level.total_quantity
+                << " (" << level.num_orders << ")" << std::endl;
+    }
+  }
+  std::cout << std::endl;
+}
+
+void OrderBook::print_order_status(int order_id) const {
+  auto order = get_order(order_id);
+  if (order) {
+    std::cout << "\n=== Order Status ===" << std::endl;
+    std::cout << *order << std::endl;
+  } else {
+    std::cout << "Order " << order_id << " not found." << std::endl;
+  }
+}
+
 void OrderBook::print_pending_stops() const {
   std::cout << "\n=== Pending Stop Orders ===" << std::endl;
 
@@ -807,6 +861,24 @@ void OrderBook::print_pending_stops() const {
   }
 
   std::cout << std::endl;
+}
+
+void OrderBook::print_trade_timeline() const {
+  std::cout << "\n=== Trade Timeline ===" << std::endl;
+
+  if (fills_.empty()) {
+    std::cout << "No trades executed." << std::endl;
+    return;
+  }
+
+  std::cout << "Displaying " << fills_.size()
+            << " fills in chronological order:\n"
+            << std::endl;
+
+  for (size_t i = 0; i < fills_.size(); ++i) {
+    const auto &fill = fills_[i];
+    std::cout << "[" << (i + 1) << "] " << fill << std::endl;
+  }
 }
 
 void OrderBook::print_latency_stats() const {
@@ -878,6 +950,54 @@ void OrderBook::print_match_stats() const {
   }
 
   print_latency_stats();
+}
+
+void OrderBook::print_fill_rate_analysis() const {
+  if (insertion_latencies_ns_.empty()) {
+    std::cout << "No orders to analyze!" << std::endl;
+    return;
+  }
+
+  std::cout << "\n=== Fill Rate Analysis ===" << std::endl;
+
+  size_t total_orders = insertion_latencies_ns_.size();
+
+  std::set<int> filled_order_ids;
+  for (const auto &fill : fills_) {
+    filled_order_ids.insert(fill.buy_order_id);
+    filled_order_ids.insert(fill.sell_order_id);
+  }
+  size_t orders_with_fills = filled_order_ids.size();
+
+  double fill_rate =
+      (static_cast<double>(orders_with_fills) / total_orders) * 100.0;
+
+  std::cout << "Orders that generated fills: " << orders_with_fills << " / "
+            << total_orders << " (" << std::fixed << std::setprecision(1)
+            << fill_rate << "%)" << std::endl;
+  std::cout << "Orders added to book (no fill): "
+            << (total_orders - orders_with_fills) << std::endl;
+}
+
+// ============================================================================
+//  PERSISTENCE & RECOVERY
+// ============================================================================
+
+void OrderBook::save_events(const std::string &filename) const {
+  std::ofstream file(filename);
+  if (!file.is_open()) {
+    throw std::runtime_error("Could not open file: " + filename);
+  }
+
+  file << OrderEvent::csv_header() << "\n";
+
+  for (const auto &event : event_log_) {
+    file << event.to_csv() << "\n";
+  }
+
+  file.close();
+  std::cout << "Saved " << event_log_.size() << "events to " << filename
+            << std::endl;
 }
 
 Snapshot OrderBook::create_snapshot() const {
@@ -1027,92 +1147,4 @@ void OrderBook::recover_from_checkpoint(const std::string &snapshot_file,
   }
 
   std::cout << "Recovery complete" << std::endl;
-}
-
-void OrderBook::print_fill_rate_analysis() const {
-  if (insertion_latencies_ns_.empty()) {
-    std::cout << "No orders to analyze!" << std::endl;
-    return;
-  }
-
-  std::cout << "\n=== Fill Rate Analysis ===" << std::endl;
-
-  size_t total_orders = insertion_latencies_ns_.size();
-
-  std::set<int> filled_order_ids;
-  for (const auto &fill : fills_) {
-    filled_order_ids.insert(fill.buy_order_id);
-    filled_order_ids.insert(fill.sell_order_id);
-  }
-  size_t orders_with_fills = filled_order_ids.size();
-
-  double fill_rate =
-      (static_cast<double>(orders_with_fills) / total_orders) * 100.0;
-
-  std::cout << "Orders that generated fills: " << orders_with_fills << " / "
-            << total_orders << " (" << std::fixed << std::setprecision(1)
-            << fill_rate << "%)" << std::endl;
-  std::cout << "Orders added to book (no fill): "
-            << (total_orders - orders_with_fills) << std::endl;
-}
-
-void OrderBook::print_book_summary() const {
-  std::cout << "\n=== Current Book State ===" << std::endl;
-
-  std::cout << "Orders in book: " << (bids_.size() + asks_.size()) << std::endl;
-  std::cout << "  Bids: " << bids_.size() << std::endl;
-  std::cout << "  Asks: " << asks_.size() << std::endl;
-
-  auto best_bid = get_best_bid();
-  auto best_ask = get_best_ask();
-  auto spread = get_spread();
-
-  if (best_bid && best_ask) {
-    std::cout << "\nTop of Book:" << std::endl;
-    std::cout << "  Best Bid: $" << std::fixed << std::setprecision(2)
-              << best_bid->price << " (" << best_bid->remaining_qty
-              << " shares)" << std::endl;
-    std::cout << "  Best Ask: $" << std::fixed << std::setprecision(2)
-              << best_ask->price << " (" << best_ask->remaining_qty
-              << " shares)" << std::endl;
-    std::cout << "  Spread: $" << std::fixed << std::setprecision(4) << *spread;
-
-    if (*spread < 0) {
-      std::cout << "CROSSED BOOK!" << std::endl;
-    } else if (*spread == 0) {
-      std::cout << " (locked)" << std::endl;
-    } else if (*spread < 0.10) {
-      std::cout << " (tight)" << std::endl;
-    } else {
-      std::cout << " (wide)" << std::endl;
-    }
-  } else if (best_bid) {
-    std::cout << "\nBid-only market:" << std::endl;
-    std::cout << "  Best Bid: $" << best_bid->price << std::endl;
-    std::cout << "  No asks available" << std::endl;
-  } else if (best_ask) {
-    std::cout << "\nAsk-only market:" << std::endl;
-    std::cout << "  Best Ask: $" << best_ask->price << std::endl;
-    std::cout << "  No bids available" << std::endl;
-  } else {
-    std::cout << "\nEmpty book (no orders)" << std::endl;
-  }
-}
-
-void OrderBook::print_trade_timeline() const {
-  std::cout << "\n=== Trade Timeline ===" << std::endl;
-
-  if (fills_.empty()) {
-    std::cout << "No trades executed." << std::endl;
-    return;
-  }
-
-  std::cout << "Displaying " << fills_.size()
-            << " fills in chronological order:\n"
-            << std::endl;
-
-  for (size_t i = 0; i < fills_.size(); ++i) {
-    const auto &fill = fills_[i];
-    std::cout << "[" << (i + 1) << "] " << fill << std::endl;
-  }
 }
