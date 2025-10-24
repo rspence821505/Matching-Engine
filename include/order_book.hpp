@@ -4,6 +4,7 @@
 #include "event.hpp"
 #include "fill.hpp"
 #include "order.hpp"
+#include "snapshot.hpp"
 #include "timer.hpp"
 #include <map>
 #include <optional>
@@ -33,6 +34,8 @@ private:
   std::multimap<double, Order> stop_sells_; // Sell stops: trigger at or below
   double last_trade_price_;
 
+  size_t snapshot_counter_;
+
   struct PriceLevel {
     double price;
     int total_quantity;
@@ -58,6 +61,18 @@ public:
                    std::optional<int> new_quantity);
   std::optional<Order> get_order(int order_id) const;
   void check_stop_triggers(double trade_price);
+
+  // Snapshot and recovery
+  Snapshot create_snapshot() const;
+  void restore_from_snapshot(const Snapshot &snapshot);
+  void save_snapshot(const std::string &filename) const;
+  void load_snapshot(const std::string &filename);
+
+  // Incremental recovery (snapshot + events)
+  void save_checkpoint(const std::string &snapshot_file,
+                       const std::string &events_file) const;
+  void recover_from_checkpoint(const std::string &snapshot_file,
+                               const std::string &events_file);
 
   // Event logging control
   void enable_logging() { logging_enabled_ = true; }
