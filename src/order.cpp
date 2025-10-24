@@ -211,3 +211,17 @@ std::ostream &operator<<(std::ostream &os, const Order &o) {
      << ", ts=" << o.timestamp.time_since_epoch().count() << "}";
   return os;
 }
+
+bool BidComparator::operator()(const Order &a, const Order &b) const {
+  if (a.price != b.price) {
+    return a.price < b.price;
+  }
+  return a.timestamp > b.timestamp;
+}
+
+bool AskComparator::operator()(const Order &a, const Order &b) const {
+  if (a.price != b.price) {
+    return a.price > b.price;
+  }
+  return a.timestamp > b.timestamp;
+}
