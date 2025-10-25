@@ -20,6 +20,9 @@ set(SOURCES
     src/fill.cpp
     src/latency_tracker.cpp
     src/order_book.cpp
+    src/event.cpp
+    src/snapshot.cpp
+    src/replay_engine.cpp
     src/main.cpp
 )
 
@@ -33,5 +36,12 @@ if(ENABLE_SANITIZERS)
     target_link_options(matching_engine PRIVATE -fsanitize=address,undefined)
 endif()
 
+# Add testing subdirectory
+option(BUILD_TESTS "Build test suite" ON)
+if(BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
+
 # Installation rules
 install(TARGETS matching_engine DESTINATION bin)
+

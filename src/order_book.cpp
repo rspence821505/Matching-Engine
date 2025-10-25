@@ -235,228 +235,224 @@ bool OrderBook::can_fill_order(const Order &order) const {
   return available_qty >= order.quantity;
 }
 
-void OrderBook::match_buy_order(Order &buy_order) {
-  // FOK check (unchanged)
-  if (buy_order.tif == TimeInForce::FOK) {
-    if (!can_fill_order(buy_order)) {
-      auto it = active_orders_.find(buy_order.id);
-      if (it != active_orders_.end()) {
-        it->second.state = OrderState::CANCELLED;
-      }
-      std::cout << "FOK order " << buy_order.id
-                << " cancelled (insufficient liquidity to fill "
-                << buy_order.quantity << " shares)" << std::endl;
-      return;
-    }
+// ============================================================================
+//   MATCHING ENGINE CORE - REFACTORED
+// ============================================================================
+
+// Helper: Execute a single trade between two orders
+void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
+  // Determine available quantity (respect iceberg display limits)
+  int available_qty = passive_order.is_iceberg() ? passive_order.display_qty
+                                                 : passive_order.remaining_qty;
+
+  int trade_qty = std::min(aggressive_order.remaining_qty, available_qty);
+  double trade_price = passive_order.price; // Passive order sets price
+
+  // Determine buy/sell order IDs based on sides
+  int buy_id = (aggressive_order.side == Side::BUY) ? aggressive_order.id
+                                                    : passive_order.id;
+  int sell_id = (aggressive_order.side == Side::SELL) ? aggressive_order.id
+                                                      : passive_order.id;
+
+  // Record the fill
+  fills_.emplace_back(buy_id, sell_id, trade_price, trade_qty);
+
+  // Log fill event
+  if (logging_enabled_) {
+    event_log_.emplace_back(Clock::now(), buy_id, sell_id, trade_price,
+                            trade_qty);
   }
 
-  while (buy_order.remaining_qty > 0 && !asks_.empty()) {
-    Order best_ask = asks_.top();
+  // Update quantities
+  aggressive_order.remaining_qty -= trade_qty;
+  passive_order.remaining_qty -= trade_qty;
 
-    if (buy_order.is_market_order() || buy_order.price >= best_ask.price) {
-      // CRITICAL: Only match against DISPLAY quantity for icebergs
-      int available_qty =
-          best_ask.is_iceberg() ? best_ask.display_qty : best_ask.remaining_qty;
-
-      int trade_qty = std::min(buy_order.remaining_qty, available_qty);
-      double trade_price = best_ask.price;
-
-      fills_.emplace_back(buy_order.id, best_ask.id, trade_price, trade_qty);
-
-      /// Log fill event
-      if (logging_enabled_) {
-        event_log_.emplace_back(Clock::now(), buy_order.id, best_ask.id,
-                                trade_price, trade_qty);
-      }
-
-      // Check if this trade triggers and stops
-      check_stop_triggers(trade_price);
-
-      buy_order.remaining_qty -= trade_qty;
-      best_ask.remaining_qty -= trade_qty;
-
-      // Update display quantity for icebergs
-      if (best_ask.is_iceberg()) {
-        best_ask.display_qty -= trade_qty;
-      }
-
-      asks_.pop();
-
-      // Check if ask needs refresh (iceberg exhausted display)
-      if (best_ask.needs_refresh()) {
-        best_ask.refresh_display();
-        asks_.push(best_ask); // Re-add with new timestamp (loses priority!)
-      } else if (best_ask.remaining_qty > 0) {
-        asks_.push(best_ask);
-      }
-
-      // Update both orders in active_orders_
-      auto buy_it = active_orders_.find(buy_order.id);
-      if (buy_it != active_orders_.end()) {
-        buy_it->second.remaining_qty = buy_order.remaining_qty;
-        if (buy_order.is_iceberg()) {
-          buy_it->second.display_qty = buy_order.display_qty;
-        }
-        if (buy_order.is_filled()) {
-          buy_it->second.state = OrderState::FILLED;
-        } else if (buy_order.remaining_qty < buy_order.quantity) {
-          buy_it->second.state = OrderState::PARTIALLY_FILLED;
-        }
-      }
-
-      auto ask_it = active_orders_.find(best_ask.id);
-      if (ask_it != active_orders_.end()) {
-        ask_it->second.remaining_qty = best_ask.remaining_qty;
-        if (best_ask.is_iceberg()) {
-          ask_it->second.display_qty = best_ask.display_qty;
-          ask_it->second.hidden_qty = best_ask.hidden_qty;
-        }
-        if (best_ask.is_filled()) {
-          ask_it->second.state = OrderState::FILLED;
-        } else if (best_ask.remaining_qty < best_ask.quantity) {
-          ask_it->second.state = OrderState::PARTIALLY_FILLED;
-        }
-      }
-    } else {
-      break;
-    }
+  if (passive_order.is_iceberg()) {
+    passive_order.display_qty -= trade_qty;
   }
 
-  // Handle unfilled quantity based on TIF
-  if (buy_order.remaining_qty > 0) {
-    if (buy_order.can_rest_in_book()) {
-      bids_.push(buy_order);
-    } else {
-      auto it = active_orders_.find(buy_order.id);
-      if (it != active_orders_.end()) {
-        it->second.state = OrderState::CANCELLED;
-      }
+  // Check for stop order triggers
+  check_stop_triggers(trade_price);
+}
 
-      if (buy_order.tif == TimeInForce::IOC) {
-        int filled = buy_order.quantity - buy_order.remaining_qty;
-        if (filled > 0) {
-          std::cout << "IOC order " << buy_order.id << " partially filled ("
-                    << filled << "/" << buy_order.quantity
-                    << "), remaining cancelled" << std::endl;
-        } else {
-          std::cout << "IOC order " << buy_order.id
-                    << " cancelled (no immediate liquidity)" << std::endl;
-        }
-      }
+// Helper: Update order state in active_orders_ map
+void OrderBook::update_order_state(Order &order) {
+  auto it = active_orders_.find(order.id);
+  if (it == active_orders_.end()) {
+    return;
+  }
+
+  // Update quantities
+  it->second.remaining_qty = order.remaining_qty;
+
+  if (order.is_iceberg()) {
+    it->second.display_qty = order.display_qty;
+    it->second.hidden_qty = order.hidden_qty;
+  }
+
+  // Update state
+  if (order.is_filled()) {
+    it->second.state = OrderState::FILLED;
+  } else if (order.remaining_qty < order.quantity) {
+    it->second.state = OrderState::PARTIALLY_FILLED;
+  }
+}
+
+// Helper: Check if order can match at current price
+bool OrderBook::can_match(const Order &aggressive, const Order &passive) const {
+  if (aggressive.is_market_order()) {
+    return true;
+  }
+
+  if (aggressive.side == Side::BUY) {
+    return aggressive.price >= passive.price;
+  } else {
+    return aggressive.price <= passive.price;
+  }
+}
+
+// Helper: Handle passive order after matching (re-add or refresh iceberg)
+template <typename PriorityQueue>
+void OrderBook::handle_passive_order_after_match(Order &passive_order,
+                                                 PriorityQueue &book) {
+  // Check if iceberg needs refresh
+  if (passive_order.needs_refresh()) {
+    passive_order.refresh_display();
+    book.push(passive_order); // Re-add with new timestamp (loses priority!)
+  } else if (passive_order.remaining_qty > 0) {
+    book.push(passive_order); // Re-add remaining quantity
+  }
+  // If fully filled, don't re-add
+}
+
+// Helper: Handle unfilled aggressive order based on TIF
+void OrderBook::handle_unfilled_order(
+    Order &order,
+    std::priority_queue<Order, std::vector<Order>, BidComparator> *bid_book,
+    std::priority_queue<Order, std::vector<Order>, AskComparator> *ask_book) {
+  if (order.remaining_qty == 0) {
+    return; // Fully filled, nothing to do
+  }
+
+  // Check if order can rest in book (GTC, DAY)
+  if (order.can_rest_in_book()) {
+    if (order.side == Side::BUY && bid_book) {
+      bid_book->push(order);
+    } else if (order.side == Side::SELL && ask_book) {
+      ask_book->push(order);
+    }
+    return;
+  }
+
+  // Order cannot rest - cancel it
+  auto it = active_orders_.find(order.id);
+  if (it != active_orders_.end()) {
+    it->second.state = OrderState::CANCELLED;
+  }
+
+  // Print IOC-specific messages
+  if (order.tif == TimeInForce::IOC) {
+    int filled = order.quantity - order.remaining_qty;
+    if (filled > 0) {
+      std::cout << "IOC order " << order.id << " partially filled (" << filled
+                << "/" << order.quantity << "), remaining cancelled"
+                << std::endl;
+    } else {
+      std::cout << "IOC order " << order.id
+                << " cancelled (no immediate liquidity)" << std::endl;
     }
   }
 }
 
-void OrderBook::match_sell_order(Order &sell_order) {
-  // FOK check (unchanged)
-  if (sell_order.tif == TimeInForce::FOK) {
-    if (!can_fill_order(sell_order)) {
-      auto it = active_orders_.find(sell_order.id);
-      if (it != active_orders_.end()) {
-        it->second.state = OrderState::CANCELLED;
-      }
-      std::cout << "FOK order " << sell_order.id
-                << " cancelled (insufficient liquidity to fill "
-                << sell_order.quantity << " shares)" << std::endl;
-      return;
-    }
+// Helper: Check FOK condition before matching
+bool OrderBook::check_fok_condition(const Order &order) {
+  if (order.tif != TimeInForce::FOK) {
+    return true; // Not FOK, proceed
   }
 
+  if (can_fill_order(order)) {
+    return true; // FOK can be filled, proceed
+  }
+
+  // FOK cannot be filled - cancel it
+  auto it = active_orders_.find(order.id);
+  if (it != active_orders_.end()) {
+    it->second.state = OrderState::CANCELLED;
+  }
+
+  std::cout << "FOK order " << order.id
+            << " cancelled (insufficient liquidity to fill " << order.quantity
+            << " shares)" << std::endl;
+
+  return false; // Don't proceed with matching
+}
+
+// Main matching method for buy orders - now much cleaner
+void OrderBook::match_buy_order(Order &buy_order) {
+  // FOK pre-check
+  if (!check_fok_condition(buy_order)) {
+    return;
+  }
+
+  // Match against asks
+  while (buy_order.remaining_qty > 0 && !asks_.empty()) {
+    Order best_ask = asks_.top();
+
+    // Check if orders can match at this price
+    if (!can_match(buy_order, best_ask)) {
+      break; // No more matches possible
+    }
+
+    // Remove passive order from book
+    asks_.pop();
+
+    // Execute the trade
+    execute_trade(buy_order, best_ask);
+
+    // Update both order states
+    update_order_state(buy_order);
+    update_order_state(best_ask);
+
+    // Handle passive order (re-add if needed)
+    handle_passive_order_after_match(best_ask, asks_);
+  }
+
+  // Handle any unfilled quantity
+  handle_unfilled_order(buy_order, &bids_, nullptr);
+}
+
+// Main matching method for sell orders - symmetric to buy
+void OrderBook::match_sell_order(Order &sell_order) {
+  // FOK pre-check
+  if (!check_fok_condition(sell_order)) {
+    return;
+  }
+
+  // Match against bids
   while (sell_order.remaining_qty > 0 && !bids_.empty()) {
     Order best_bid = bids_.top();
 
-    if (sell_order.is_market_order() || sell_order.price <= best_bid.price) {
-      // CRITICAL: Only match against DISPLAY quantity for icebergs
-      int available_qty =
-          best_bid.is_iceberg() ? best_bid.display_qty : best_bid.remaining_qty;
-
-      int trade_qty = std::min(sell_order.remaining_qty, available_qty);
-      double trade_price = best_bid.price;
-
-      fills_.emplace_back(best_bid.id, sell_order.id, trade_price, trade_qty);
-
-      // Log fill event
-      if (logging_enabled_) {
-        event_log_.emplace_back(Clock::now(), best_bid.id, sell_order.id,
-                                trade_price, trade_qty);
-      }
-
-      // Check if this trade triggers and stops
-      check_stop_triggers(trade_price);
-
-      sell_order.remaining_qty -= trade_qty;
-      best_bid.remaining_qty -= trade_qty;
-
-      // Update display quantity for icebergs
-      if (best_bid.is_iceberg()) {
-        best_bid.display_qty -= trade_qty;
-      }
-
-      bids_.pop();
-
-      // Check if bid needs refresh (iceberg exhausted display)
-      if (best_bid.needs_refresh()) {
-        best_bid.refresh_display();
-        bids_.push(best_bid); // Re-add with new timestamp (loses priority!)
-      } else if (best_bid.remaining_qty > 0) {
-        bids_.push(best_bid);
-      }
-
-      // Update both orders in active_orders_
-      auto sell_it = active_orders_.find(sell_order.id);
-      if (sell_it != active_orders_.end()) {
-        sell_it->second.remaining_qty = sell_order.remaining_qty;
-        if (sell_order.is_iceberg()) {
-          sell_it->second.display_qty = sell_order.display_qty;
-        }
-        if (sell_order.is_filled()) {
-          sell_it->second.state = OrderState::FILLED;
-        } else if (sell_order.remaining_qty < sell_order.quantity) {
-          sell_it->second.state = OrderState::PARTIALLY_FILLED;
-        }
-      }
-
-      auto bid_it = active_orders_.find(best_bid.id);
-      if (bid_it != active_orders_.end()) {
-        bid_it->second.remaining_qty = best_bid.remaining_qty;
-        if (best_bid.is_iceberg()) {
-          bid_it->second.display_qty = best_bid.display_qty;
-          bid_it->second.hidden_qty = best_bid.hidden_qty;
-        }
-        if (best_bid.is_filled()) {
-          bid_it->second.state = OrderState::FILLED;
-        } else if (best_bid.remaining_qty < best_bid.quantity) {
-          bid_it->second.state = OrderState::PARTIALLY_FILLED;
-        }
-      }
-    } else {
-      break;
+    // Check if orders can match at this price
+    if (!can_match(sell_order, best_bid)) {
+      break; // No more matches possible
     }
+
+    // Remove passive order from book
+    bids_.pop();
+
+    // Execute the trade
+    execute_trade(sell_order, best_bid);
+
+    // Update both order states
+    update_order_state(sell_order);
+    update_order_state(best_bid);
+
+    // Handle passive order (re-add if needed)
+    handle_passive_order_after_match(best_bid, bids_);
   }
 
-  // Handle unfilled quantity based on TIF
-  if (sell_order.remaining_qty > 0) {
-    if (sell_order.can_rest_in_book()) {
-      asks_.push(sell_order);
-    } else {
-      auto it = active_orders_.find(sell_order.id);
-      if (it != active_orders_.end()) {
-        it->second.state = OrderState::CANCELLED;
-      }
-
-      if (sell_order.tif == TimeInForce::IOC) {
-        int filled = sell_order.quantity - sell_order.remaining_qty;
-        if (filled > 0) {
-          std::cout << "IOC order " << sell_order.id << " partially filled ("
-                    << filled << "/" << sell_order.quantity
-                    << "), remaining cancelled" << std::endl;
-        } else {
-          std::cout << "IOC order " << sell_order.id
-                    << " cancelled (no immediate liquidity)" << std::endl;
-        }
-      }
-    }
-  }
+  // Handle any unfilled quantity
+  handle_unfilled_order(sell_order, nullptr, &asks_);
 }
 
 // ============================================================================

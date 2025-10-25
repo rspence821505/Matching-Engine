@@ -21,6 +21,21 @@ private:
   std::vector<Fill> fills_;
   std::vector<long long> insertion_latencies_ns_;
 
+  void execute_trade(Order &aggressive_order, Order &passive_order);
+  void update_order_state(Order &order);
+  bool can_match(const Order &aggressive, const Order &passive) const;
+
+  template <typename PriorityQueue>
+  void handle_passive_order_after_match(Order &passive_order,
+                                        PriorityQueue &book);
+
+  void handle_unfilled_order(
+      Order &order,
+      std::priority_queue<Order, std::vector<Order>, BidComparator> *bid_book,
+      std::priority_queue<Order, std::vector<Order>, AskComparator> *ask_book);
+
+  bool check_fok_condition(const Order &order);
+
   void match_buy_order(Order &buy_order);
   void match_sell_order(Order &sell_order);
   bool can_fill_order(const Order &order) const;
