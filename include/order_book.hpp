@@ -60,6 +60,15 @@ private:
   std::vector<PriceLevel> get_bid_levels(int max_levels) const;
   std::vector<PriceLevel> get_ask_levels(int max_levels) const;
 
+  // ===========================
+  // NEW: helpers for the fixes
+  // ===========================
+  double current_trigger_price_for_side(Side side) const; // NEW
+  bool stop_should_trigger_now(const Order &o) const;     // NEW
+  void trigger_stop_order_immediately(Order &stop_order,
+                                      double ref_price); // NEW
+  void finalize_after_matching(Order &o);                // NEW
+
 public:
   OrderBook();
 

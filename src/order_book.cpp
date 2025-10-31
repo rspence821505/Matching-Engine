@@ -16,6 +16,100 @@ OrderBook::OrderBook()
     : logging_enabled_(false), last_trade_price_(0), snapshot_counter_(0) {}
 
 // ============================================================================
+//  HELPERS (for stop triggers & post-match finalization)
+// ============================================================================
+
+// Reference price for stop triggers: prefer last trade, otherwise top-of-book
+double OrderBook::current_trigger_price_for_side(Side side) const {
+  if (last_trade_price_ > 0.0) {
+    return last_trade_price_;
+  }
+  if (side ==
+      Side::SELL) { // stop-sell (stop loss) compares to best bid if no trades
+    auto bb = get_best_bid();
+    return bb ? bb->price : std::numeric_limits<double>::infinity();
+  } else { // BUY: compare to best ask if no trades
+    auto ba = get_best_ask();
+    return ba ? ba->price : 0.0;
+  }
+}
+
+// Should a just-placed stop trigger immediately under current conditions?
+bool OrderBook::stop_should_trigger_now(const Order &o) const {
+  if (!o.is_stop || o.stop_triggered)
+    return false;
+  const double ref = current_trigger_price_for_side(o.side);
+  if (o.side == Side::SELL) {
+    return ref <= o.stop_price; // stop-sell triggers when price <= stop
+  } else {
+    return ref >= o.stop_price; // stop-buy triggers when price >= stop
+  }
+}
+
+// Convert stop to market/limit and route into normal matching
+void OrderBook::trigger_stop_order_immediately(Order &stop_order,
+                                               double ref_price) {
+  std::cout << "Stop-" << (stop_order.side == Side::BUY ? "buy" : "sell")
+            << " order " << stop_order.id << " triggered at $" << std::fixed
+            << std::setprecision(2) << ref_price << std::endl;
+
+  // Use your existing API to flip flags/type
+  stop_order.trigger_stop();
+  stop_order.is_stop = false;
+  stop_order.state = OrderState::ACTIVE;
+
+  // Ensure active_orders_ is updated before routing
+  active_orders_.insert_or_assign(stop_order.id, stop_order);
+
+  if (stop_order.side == Side::BUY) {
+    match_buy_order(stop_order);
+  } else {
+    match_sell_order(stop_order);
+  }
+}
+
+// Ensure terminal states are correct (esp. IOC partial -> CANCELLED)
+void OrderBook::finalize_after_matching(Order &o) {
+  // If already terminal, do not overwrite
+  auto it = active_orders_.find(o.id);
+  if (it != active_orders_.end()) {
+    if (it->second.state == OrderState::CANCELLED ||
+        it->second.state == OrderState::FILLED) {
+      return;
+    }
+  }
+
+  if (o.tif == TimeInForce::IOC) {
+    if (o.remaining_qty > 0) {
+      // Partial or zero fill with remainder -> CANCELLED
+      o.state = OrderState::CANCELLED;
+      if (it != active_orders_.end()) {
+        it->second.state = OrderState::CANCELLED;
+        it->second.remaining_qty = 0;
+      }
+    } else {
+      o.state = OrderState::FILLED;
+      if (it != active_orders_.end())
+        it->second.state = OrderState::FILLED;
+    }
+    return;
+  }
+
+  // FOK handled in check_fok_condition()
+
+  // GTC/DAY/etc. bookkeeping
+  if (o.remaining_qty == 0) {
+    o.state = OrderState::FILLED;
+    if (it != active_orders_.end())
+      it->second.state = OrderState::FILLED;
+  } else if (o.remaining_qty < o.quantity) {
+    o.state = OrderState::PARTIALLY_FILLED;
+    if (it != active_orders_.end())
+      it->second.state = OrderState::PARTIALLY_FILLED;
+  }
+}
+
+// ============================================================================
 //  CORE ORDER OPERATIONS
 // ============================================================================
 
@@ -25,10 +119,24 @@ void OrderBook::add_order(Order o) {
 
   Order order = o;
 
-  // Handle stop orders
+  // Handle stop orders (now with trigger-on-placement)
   if (order.is_stop && !order.stop_triggered) {
-    // Stop orders fo to pending lis, not active matching
+    // If conditions already meet the stop, trigger immediately (do NOT enqueue)
+    if (stop_should_trigger_now(order)) {
+      const double ref = current_trigger_price_for_side(order.side);
 
+      // Track as ACTIVE then route
+      order.state = OrderState::ACTIVE;
+      active_orders_.insert_or_assign(order.id, order);
+
+      trigger_stop_order_immediately(order, ref);
+
+      timer.stop();
+      insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
+      return;
+    }
+
+    // Otherwise, enqueue as pending stop (original behavior)
     order.state = OrderState::PENDING;
     active_orders_.insert_or_assign(order.id, order);
 
@@ -51,7 +159,7 @@ void OrderBook::add_order(Order o) {
 
   // Regular orders (or triggered stops) proceed normally
   order.state = OrderState::ACTIVE;
-  active_orders_.insert({order.id, order});
+  active_orders_.insert_or_assign(order.id, order);
 
   if (logging_enabled_) {
     // Handle market orders with infinite price properly
@@ -75,12 +183,9 @@ void OrderBook::add_order(Order o) {
     throw std::runtime_error("Invalid order side");
   }
 
-  // Update order state after matching
-  if (order.is_filled()) {
-    active_orders_.at(order.id).state = OrderState::FILLED;
-  } else if (order.remaining_qty < order.quantity) {
-    active_orders_.at(order.id).state = OrderState::PARTIALLY_FILLED;
-  }
+  // IMPORTANT: finalize states (prevents overwriting IOC remainder =>
+  // CANCELLED)
+  finalize_after_matching(order);
 
   timer.stop();
   insertion_latencies_ns_.push_back(timer.elapsed_nanoseconds());
@@ -466,6 +571,7 @@ void OrderBook::match_buy_order(Order &buy_order) {
 
   handle_unfilled_order(buy_order, &bids_, nullptr);
 }
+
 void OrderBook::match_sell_order(Order &sell_order) {
   if (!check_fok_condition(sell_order)) {
     return;
@@ -526,7 +632,7 @@ void OrderBook::match_sell_order(Order &sell_order) {
 // ============================================================================
 // STOP ORDER MANAGEMENT
 // ============================================================================
-// Fix check_stop_triggers
+// Existing trigger-on-trade sweep (kept; now complements trigger-on-placement)
 void OrderBook::check_stop_triggers(double trade_price) {
   last_trade_price_ = trade_price;
 
@@ -562,24 +668,8 @@ void OrderBook::check_stop_triggers(double trade_price) {
 
   // Process all triggered stops
   for (auto &stop_order : triggered_orders) {
-    std::cout << "Stop-" << (stop_order.side == Side::BUY ? "buy" : "sell")
-              << " order " << stop_order.id << " triggered at $" << std::fixed
-              << std::setprecision(2) << trade_price << std::endl;
-
-    stop_order.trigger_stop();
-
-    // Update in active_orders_
-    auto it = active_orders_.find(stop_order.id);
-    if (it != active_orders_.end()) {
-      it->second = stop_order;
-    }
-
-    // Match the order directly
-    if (stop_order.side == Side::BUY) {
-      match_buy_order(stop_order);
-    } else {
-      match_sell_order(stop_order);
-    }
+    // Reuse the new helper for consistent routing/logs
+    trigger_stop_order_immediately(stop_order, trade_price);
   }
 }
 
@@ -979,7 +1069,7 @@ void OrderBook::print_latency_stats() const {
   std::cout << "Max: " << max << " ns" << std::endl;
   std::cout << "p50: " << p50 << " ns" << std::endl;
   std::cout << "p95: " << p95 << " ns" << std::endl;
-  std::cout << "p99: " << p99 << " ns" << std::endl;
+  std::cout << "p99: " << p99 << std::endl;
 }
 
 void OrderBook::print_match_stats() const {
