@@ -31,7 +31,7 @@ TEST_F(PersistenceTest, SnapshotSaveAndLoad) {
   OrderBook recovered_book;
   recovered_book.load_snapshot(snapshot_file);
 
-  // Verify state preserved
+  // Verify state preserved in test
   EXPECT_EQ(recovered_book.get_fills().size(), original_fills);
   EXPECT_EQ(recovered_book.bids_size(), book->bids_size());
   EXPECT_EQ(recovered_book.asks_size(), book->asks_size());
