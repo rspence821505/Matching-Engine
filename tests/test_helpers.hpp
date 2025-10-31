@@ -25,6 +25,16 @@ protected:
     book->add_order(Order{id, side, OrderType::MARKET, qty});
   }
 
+  // Helper: Get pending stop count
+  int pending_stop_count_int() const {
+    return static_cast<int>(book->pending_stop_count());
+  }
+
+  // Helper: Get fill count
+  int fill_count_int() const {
+    return static_cast<int>(book->get_fills().size());
+  }
+
   // Helper: Verify fill exists
   bool has_fill(int buy_id, int sell_id, double price, int qty) {
     const auto &fills = book->get_fills();
@@ -54,14 +64,14 @@ protected:
 
   // Helper: Verify book is empty
   void assert_empty_book() {
-    EXPECT_EQ(book->bids_size(), 0u);
-    EXPECT_EQ(book->asks_size(), 0u);
+    EXPECT_EQ(book->active_bids_count(), 0u);
+    EXPECT_EQ(book->active_asks_count(), 0u);
   }
 
   // Helper: Verify book has orders
   void assert_book_has_orders(size_t bid_count, size_t ask_count) {
-    EXPECT_EQ(book->bids_size(), bid_count);
-    EXPECT_EQ(book->asks_size(), ask_count);
+    EXPECT_EQ(book->active_bids_count(), bid_count);
+    EXPECT_EQ(book->active_asks_count(), ask_count);
   }
 };
 

@@ -98,7 +98,6 @@ bool OrderBook::cancel_order(int order_id) {
     event_log_.emplace_back(Clock::now(), EventType::CANCEL_ORDER, order_id);
   }
 
-  // check if order exits and is active
   auto it = active_orders_.find(order_id);
   if (it == active_orders_.end()) {
     std::cout << "Order " << order_id << " not found or already processed."
@@ -107,7 +106,6 @@ bool OrderBook::cancel_order(int order_id) {
   }
   Order &order = it->second;
 
-  // Can't cancel filled orders
   if (order.is_filled()) {
     std::cout << "Order " << order_id << " is already filled." << '\n';
     return false;
@@ -120,9 +118,13 @@ bool OrderBook::cancel_order(int order_id) {
   cancelled_orders_.insert({order_id, order});
   active_orders_.erase(it);
 
+  // Priority queues can't efficiently remove mid-queue
+  // So leave in queue, but skip during matching
+  // The matching logic should check if order is still active
+
   timer.stop();
 
-  std::cout << "✓ Cancelled order " << order_id
+  std::cout << "Cancelled order " << order_id
             << " (latency: " << timer.elapsed_nanoseconds() << " ns)" << '\n';
 
   return true;
@@ -151,27 +153,19 @@ bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
     return false;
   }
 
-  // Lazy deletion: Cancel old order and create a new one
+  // Extract order details
   Side side = order.side;
-
-  // If new_price has a value, use it. Otherwise, use the default (order.price)
   double price = new_price.value_or(order.price);
   int quantity = new_quantity.value_or(order.remaining_qty);
 
+  // Cancel old order
   cancel_order(order_id);
 
   // Create new order with same ID
   Order amended_order(order_id, side, price, quantity);
-  amended_order.state = OrderState::ACTIVE;
 
-  // re add to book
-  if (side == Side::BUY) {
-    bids_.push(amended_order);
-  } else {
-    asks_.push(amended_order);
-  }
-
-  active_orders_.insert({order_id, amended_order});
+  // CRITICAL: Use add_order() to trigger matching logic
+  add_order(amended_order);
 
   timer.stop();
 
@@ -194,6 +188,45 @@ std::optional<Order> OrderBook::get_order(int order_id) const {
   }
 
   return std::nullopt;
+}
+
+size_t OrderBook::active_bids_count() const {
+  auto bids_copy = bids_;
+  size_t count = 0;
+
+  while (!bids_copy.empty()) {
+    Order order = bids_copy.top();
+    bids_copy.pop();
+
+    // Only count if still active
+    auto it = active_orders_.find(order.id);
+    if (it != active_orders_.end() &&
+        it->second.state != OrderState::CANCELLED &&
+        it->second.state != OrderState::FILLED) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+size_t OrderBook::active_asks_count() const {
+  auto asks_copy = asks_;
+  size_t count = 0;
+
+  while (!asks_copy.empty()) {
+    Order order = asks_copy.top();
+    asks_copy.pop();
+
+    auto it = active_orders_.find(order.id);
+    if (it != active_orders_.end() &&
+        it->second.state != OrderState::CANCELLED &&
+        it->second.state != OrderState::FILLED) {
+      count++;
+    }
+  }
+
+  return count;
 }
 
 // ============================================================================
@@ -234,10 +267,6 @@ bool OrderBook::can_fill_order(const Order &order) const {
   }
   return available_qty >= order.quantity;
 }
-
-// ============================================================================
-//   MATCHING ENGINE CORE - REFACTORED
-// ============================================================================
 
 // Helper: Execute a single trade between two orders
 void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
@@ -330,11 +359,11 @@ void OrderBook::handle_unfilled_order(
     Order &order,
     std::priority_queue<Order, std::vector<Order>, BidComparator> *bid_book,
     std::priority_queue<Order, std::vector<Order>, AskComparator> *ask_book) {
+
   if (order.remaining_qty == 0) {
-    return; // Fully filled, nothing to do
+    return;
   }
 
-  // Check if order can rest in book (GTC, DAY)
   if (order.can_rest_in_book()) {
     if (order.side == Side::BUY && bid_book) {
       bid_book->push(order);
@@ -348,9 +377,12 @@ void OrderBook::handle_unfilled_order(
   auto it = active_orders_.find(order.id);
   if (it != active_orders_.end()) {
     it->second.state = OrderState::CANCELLED;
+
+    // CRITICAL FIX: Move to cancelled_orders_
+    cancelled_orders_.insert({order.id, it->second});
+    active_orders_.erase(it);
   }
 
-  // Print IOC-specific messages
   if (order.tif == TimeInForce::IOC) {
     int filled = order.quantity - order.remaining_qty;
     if (filled > 0) {
@@ -387,71 +419,71 @@ bool OrderBook::check_fok_condition(const Order &order) {
   return false; // Don't proceed with matching
 }
 
-// Main matching method for buy orders - now much cleaner
 void OrderBook::match_buy_order(Order &buy_order) {
-  // FOK pre-check
   if (!check_fok_condition(buy_order)) {
     return;
   }
 
-  // Match against asks
   while (buy_order.remaining_qty > 0 && !asks_.empty()) {
     Order best_ask = asks_.top();
-
-    // Check if orders can match at this price
-    if (!can_match(buy_order, best_ask)) {
-      break; // No more matches possible
-    }
-
-    // Remove passive order from book
     asks_.pop();
 
-    // Execute the trade
-    execute_trade(buy_order, best_ask);
+    // CRITICAL: Skip cancelled/filled orders in queue
+    auto it = active_orders_.find(best_ask.id);
+    if (it == active_orders_.end() ||
+        it->second.state == OrderState::CANCELLED ||
+        it->second.state == OrderState::FILLED) {
+      continue; // Skip this order
+    }
 
-    // Update both order states
+    // Update to latest state from active_orders_
+    best_ask = it->second;
+
+    if (!can_match(buy_order, best_ask)) {
+      asks_.push(best_ask); // Put it back
+      break;
+    }
+
+    execute_trade(buy_order, best_ask);
     update_order_state(buy_order);
     update_order_state(best_ask);
-
-    // Handle passive order (re-add if needed)
     handle_passive_order_after_match(best_ask, asks_);
   }
 
-  // Handle any unfilled quantity
   handle_unfilled_order(buy_order, &bids_, nullptr);
 }
 
-// Main matching method for sell orders - symmetric to buy
 void OrderBook::match_sell_order(Order &sell_order) {
-  // FOK pre-check
   if (!check_fok_condition(sell_order)) {
     return;
   }
 
-  // Match against bids
   while (sell_order.remaining_qty > 0 && !bids_.empty()) {
     Order best_bid = bids_.top();
-
-    // Check if orders can match at this price
-    if (!can_match(sell_order, best_bid)) {
-      break; // No more matches possible
-    }
-
-    // Remove passive order from book
     bids_.pop();
 
-    // Execute the trade
-    execute_trade(sell_order, best_bid);
+    // CRITICAL: Skip cancelled/filled orders in queue
+    auto it = active_orders_.find(best_bid.id);
+    if (it == active_orders_.end() ||
+        it->second.state == OrderState::CANCELLED ||
+        it->second.state == OrderState::FILLED) {
+      continue;
+    }
 
-    // Update both order states
+    // Update to latest state
+    best_bid = it->second;
+
+    if (!can_match(sell_order, best_bid)) {
+      bids_.push(best_bid);
+      break;
+    }
+
+    execute_trade(sell_order, best_bid);
     update_order_state(sell_order);
     update_order_state(best_bid);
-
-    // Handle passive order (re-add if needed)
     handle_passive_order_after_match(best_bid, bids_);
   }
 
-  // Handle any unfilled quantity
   handle_unfilled_order(sell_order, nullptr, &asks_);
 }
 
@@ -462,51 +494,48 @@ void OrderBook::match_sell_order(Order &sell_order) {
 void OrderBook::check_stop_triggers(double trade_price) {
   last_trade_price_ = trade_price;
 
+  // Collect all triggers FIRST (avoid iterator invalidation)
+  std::vector<Order> triggered_buys;
+  std::vector<Order> triggered_sells;
+
   // Check buy stops (trigger when price rises to/above stop_price)
-  auto buy_it = stop_buys_.begin();
-  while (buy_it != stop_buys_.end()) {
-    if (trade_price >= buy_it->first) {
-      Order stop_order = buy_it->second;
-
-      // Remove from stop book
-      buy_it = stop_buys_.erase(buy_it);
-
-      // Trigger the stop order
-      stop_order.trigger_stop();
-
-      // Remove old state from active_orders
-      active_orders_.erase(stop_order.id);
-      // Re-submit as active order
-      add_order(stop_order);
-
+  for (auto it = stop_buys_.begin(); it != stop_buys_.end();) {
+    if (trade_price >= it->first) {
+      triggered_buys.push_back(it->second);
+      it = stop_buys_.erase(it); // erase returns next iterator
     } else {
-      break; // Stop prices are sorted, no more will trigger
+      break; // Map is sorted by price, no more will trigger
     }
   }
 
   // Check sell stops (trigger when price falls to/below stop_price)
-  auto sell_it = stop_sells_.rbegin();
-  while (sell_it != stop_sells_.rend()) {
-    if (trade_price <= sell_it->first) {
-      Order stop_order = sell_it->second;
+  // CAREFUL: multimap iteration for sell stops
+  std::vector<std::multimap<double, Order>::iterator> to_erase;
 
-      // Convert reverse iterator to forward for erase
-      auto forward_it = std::next(sell_it).base();
-      stop_sells_.erase(forward_it);
-
-      // Trigger and execute
-      stop_order.trigger_stop();
-
-      // Remove old state form active_orders
-      active_orders_.erase(stop_order.id);
-      // Re-submit as active order
-      add_order(stop_order);
-
-      // Reset iterator after modification
-      sell_it = stop_sells_.rbegin();
-    } else {
-      ++sell_it;
+  for (auto it = stop_sells_.begin(); it != stop_sells_.end(); ++it) {
+    if (trade_price <= it->first) {
+      triggered_sells.push_back(it->second);
+      to_erase.push_back(it);
     }
+    // Don't break - need to check all prices below trigger
+  }
+
+  // Erase in reverse order to avoid iterator invalidation
+  for (auto rit = to_erase.rbegin(); rit != to_erase.rend(); ++rit) {
+    stop_sells_.erase(*rit);
+  }
+
+  // Now activate all triggered stops
+  for (auto stop_order : triggered_buys) {
+    stop_order.trigger_stop();
+    active_orders_.erase(stop_order.id);
+    add_order(stop_order);
+  }
+
+  for (auto stop_order : triggered_sells) {
+    stop_order.trigger_stop();
+    active_orders_.erase(stop_order.id);
+    add_order(stop_order);
   }
 }
 

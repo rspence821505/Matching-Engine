@@ -43,7 +43,7 @@ TEST_F(PersistenceTest, EventLogging) {
   add_limit_order(1, Side::BUY, 100.0, 100);
   add_limit_order(2, Side::SELL, 100.0, 100);
 
-  EXPECT_GT(book->event_count(), 0);
+  EXPECT_GT(static_cast<int>(book->event_count()), 0);
 
   book->save_events(events_file);
   EXPECT_TRUE(std::filesystem::exists(events_file));
@@ -89,5 +89,5 @@ TEST_F(PersistenceTest, SnapshotWithStopOrders) {
   OrderBook recovered_book;
   recovered_book.load_snapshot(snapshot_file);
 
-  EXPECT_EQ(recovered_book.pending_stop_count(), 1);
+  EXPECT_EQ(static_cast<int>(recovered_book.pending_stop_count()), 1);
 }

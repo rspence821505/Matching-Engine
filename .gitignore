@@ -43,6 +43,9 @@
 # CSV files
 *.csv
 
+# Executable files
+*.exe
+
 # Build directory
 build/
 build/*

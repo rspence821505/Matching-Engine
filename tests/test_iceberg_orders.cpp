@@ -16,7 +16,7 @@ TEST_F(OrderBookTest, IcebergPartialMatch) {
   book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
   add_limit_order(2, Side::BUY, 100.0, 50); // Match 50 of display
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
   EXPECT_TRUE(has_fill(2, 1, 100.0, 50));
 
   // Iceberg should still be in book with 50 display remaining
@@ -31,7 +31,7 @@ TEST_F(OrderBookTest, IcebergRefreshAfterDisplayExhausted) {
   book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
   add_limit_order(2, Side::BUY, 100.0, 100); // Exhaust display
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
 
   // Iceberg should refresh with next 100
   auto ask = book->get_best_ask();

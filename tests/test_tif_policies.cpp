@@ -38,7 +38,7 @@ TEST_F(OrderBookTest, IOCPartiallyFilled) {
 TEST_F(OrderBookTest, IOCNoFill) {
   book->add_order(Order{1, Side::BUY, 100.0, 100, TimeInForce::IOC});
 
-  EXPECT_EQ(fill_count(), 0);
+  EXPECT_EQ(fill_count_int(), 0);
 
   auto order = book->get_order(1);
   ASSERT_TRUE(order.has_value());
@@ -58,7 +58,7 @@ TEST_F(OrderBookTest, FOKInsufficientLiquidity) {
   book->add_order(
       Order{2, Side::BUY, 100.0, 100, TimeInForce::FOK}); // Wants 100
 
-  EXPECT_EQ(fill_count(), 0); // All-or-nothing: no fill
+  EXPECT_EQ(fill_count_int(), 0); // All-or-nothing: no fill
 
   auto order = book->get_order(2);
   ASSERT_TRUE(order.has_value());

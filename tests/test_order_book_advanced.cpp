@@ -113,7 +113,7 @@ TEST_F(OrderBookTest, HighFrequencyOrders) {
   }
 
   EXPECT_GT(book->bids_size(), 0u);
-  EXPECT_GT(book->asks_size(), 0);
+  EXPECT_GT(static_cast<int>(book->asks_size()), 0);
 }
 
 TEST_F(OrderBookTest, AlternatingBuySell) {
@@ -510,7 +510,7 @@ TEST_F(OrderBookTest, FlashCrashScenario) {
   add_market_order(100, Side::BUY, 5000);
 
   // Book should be significantly depleted
-  EXPECT_LT(book->asks_size(), 10);
+  EXPECT_LT(static_cast<int>(book->asks_size()), 10);
 }
 
 TEST_F(OrderBookTest, MarketMakerQuoteUpdate) {

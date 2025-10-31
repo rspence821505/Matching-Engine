@@ -57,7 +57,7 @@ TEST_F(ReplayTest, ReplayManualControl) {
   replay->load_from_file(events_file);
 
   EXPECT_TRUE(replay->has_next_event());
-  EXPECT_EQ(replay->get_current_index(), 0);
+  EXPECT_EQ(static_cast<int>(replay->get_current_index()), 0);
 
   replay->replay_next_event();
   EXPECT_EQ(replay->get_current_index(), 1);

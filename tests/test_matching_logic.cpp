@@ -5,7 +5,7 @@ TEST_F(OrderBookTest, SimpleMatch) {
   add_limit_order(1, Side::BUY, 100.0, 100);
   add_limit_order(2, Side::SELL, 100.0, 100);
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
   EXPECT_TRUE(has_fill(1, 2, 100.0, 100));
 
   assert_empty_book(); // Both orders fully filled
@@ -15,7 +15,7 @@ TEST_F(OrderBookTest, AggressiveBuyerMarket) {
   add_limit_order(1, Side::SELL, 100.0, 100);
   add_limit_order(2, Side::BUY, 101.0, 100); // Crosses spread
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
   EXPECT_TRUE(has_fill(2, 1, 100.0, 100)); // Executes at passive price (100.0)
 }
 
@@ -23,7 +23,7 @@ TEST_F(OrderBookTest, AggressiveSellerMarket) {
   add_limit_order(1, Side::BUY, 100.0, 100);
   add_limit_order(2, Side::SELL, 99.0, 100); // Crosses spread
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
   EXPECT_TRUE(has_fill(1, 2, 100.0, 100)); // Executes at passive price (100.0)
 }
 
@@ -31,7 +31,7 @@ TEST_F(OrderBookTest, PartialFill) {
   add_limit_order(1, Side::BUY, 100.0, 100);
   add_limit_order(2, Side::SELL, 100.0, 50); // Only 50 shares
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
   EXPECT_TRUE(has_fill(1, 2, 100.0, 50));
 
   // Order 1 should have 50 remaining in book
@@ -67,7 +67,7 @@ TEST_F(OrderBookTest, MarketOrderBuy) {
   add_limit_order(1, Side::SELL, 100.0, 100);
   add_market_order(2, Side::BUY, 100);
 
-  EXPECT_EQ(fill_count(), 1);
+  EXPECT_EQ(fill_count_int(), 1);
   EXPECT_TRUE(has_fill(2, 1, 100.0, 100));
 }
 

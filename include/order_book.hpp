@@ -117,6 +117,10 @@ public:
 
   size_t bids_size() const { return bids_.size(); }
   size_t asks_size() const { return asks_.size(); }
+
+  size_t active_bids_count() const;
+  size_t active_asks_count() const;
+
   size_t pending_stop_count() const {
     return stop_buys_.size() + stop_sells_.size();
   }
