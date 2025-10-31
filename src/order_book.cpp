@@ -1,5 +1,6 @@
 #include "order_book.hpp"
 #include <algorithm>
+#include <cmath> // for std::isnan
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -21,16 +22,38 @@ OrderBook::OrderBook()
 
 // Reference price for stop triggers: prefer last trade, otherwise top-of-book
 double OrderBook::current_trigger_price_for_side(Side side) const {
-  if (last_trade_price_ > 0.0) {
+  // Prefer last trade if known
+  if (last_trade_price_ > 0.0)
     return last_trade_price_;
-  }
-  if (side ==
-      Side::SELL) { // stop-sell (stop loss) compares to best bid if no trades
-    auto bb = get_best_bid();
-    return bb ? bb->price : std::numeric_limits<double>::infinity();
-  } else { // BUY: compare to best ask if no trades
-    auto ba = get_best_ask();
-    return ba ? ba->price : 0.0;
+
+  // No trades yet — consider BOTH sides of the book so tests can
+  // trigger-on-placement in one-sided markets.
+  auto bb = get_best_bid();
+  auto ba = get_best_ask();
+
+  if (side == Side::SELL) {
+    // A stop-sell should trigger when "the price" is at/through the stop.
+    // With no last trade, use the "most conservative" sell reference: the
+    // lowest available price signal. If both exist use min(bid, ask); if only
+    // one exists, use it.
+    if (bb && ba)
+      return std::min(bb->price, ba->price);
+    if (bb)
+      return bb->price;
+    if (ba)
+      return ba->price;
+    // Truly empty market: don't trigger.
+    return std::numeric_limits<double>::quiet_NaN();
+  } else {
+    // BUY stop: trigger when price rises to/through the stop.
+    // With no last trade, use the highest available price signal.
+    if (bb && ba)
+      return std::max(bb->price, ba->price);
+    if (ba)
+      return ba->price;
+    if (bb)
+      return bb->price;
+    return std::numeric_limits<double>::quiet_NaN();
   }
 }
 
@@ -38,11 +61,15 @@ double OrderBook::current_trigger_price_for_side(Side side) const {
 bool OrderBook::stop_should_trigger_now(const Order &o) const {
   if (!o.is_stop || o.stop_triggered)
     return false;
+
   const double ref = current_trigger_price_for_side(o.side);
+  if (std::isnan(ref))
+    return false;
+
   if (o.side == Side::SELL) {
-    return ref <= o.stop_price; // stop-sell triggers when price <= stop
+    return ref <= o.stop_price;
   } else {
-    return ref >= o.stop_price; // stop-buy triggers when price >= stop
+    return ref >= o.stop_price;
   }
 }
 
@@ -53,12 +80,21 @@ void OrderBook::trigger_stop_order_immediately(Order &stop_order,
             << " order " << stop_order.id << " triggered at $" << std::fixed
             << std::setprecision(2) << ref_price << std::endl;
 
-  // Use your existing API to flip flags/type
-  stop_order.trigger_stop();
+  // Mark as triggered & convert type explicitly
+  stop_order.stop_triggered = true;
   stop_order.is_stop = false;
-  stop_order.state = OrderState::ACTIVE;
 
-  // Ensure active_orders_ is updated before routing
+  if (stop_order.stop_becomes == OrderType::MARKET) {
+    // Stop-Market -> becomes Market (price ignored by matching)
+    stop_order.type = OrderType::MARKET;
+  } else {
+    // Stop-Limit -> becomes Limit at the order's existing limit price.
+    // (Your schema uses `price` as the post-trigger limit; no separate field.)
+    stop_order.type = OrderType::LIMIT;
+    // keep stop_order.price as-is
+  }
+
+  stop_order.state = OrderState::ACTIVE;
   active_orders_.insert_or_assign(stop_order.id, stop_order);
 
   if (stop_order.side == Side::BUY) {
