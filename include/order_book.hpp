@@ -1,5 +1,4 @@
-#ifndef ORDER_BOOK_HPP
-#define ORDER_BOOK_HPP
+#pragma once
 
 #include "event.hpp"
 #include "fill.hpp"
@@ -134,5 +133,3 @@ public:
     return stop_buys_.size() + stop_sells_.size();
   }
 };
-
-#endif // ORDER_BOOK_HPP

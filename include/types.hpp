@@ -1,5 +1,4 @@
-#ifndef TYPES_HPP
-#define TYPES_HPP
+#pragma once
 
 #include <chrono>
 
@@ -36,5 +35,3 @@ enum class OrderState {
   CANCELLED,        // Canceled by user
   REJECTED          // Rejected (e.g., invalid parameters)
 };
-
-#endif // TYPES_HPP

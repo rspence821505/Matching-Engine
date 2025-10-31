@@ -19,6 +19,8 @@ set(TEST_SOURCES
     test_tif_policies.cpp
     test_persistence.cpp
     test_replay_engine.cpp
+    test_account.cpp
+    test_position_manager.cpp
 )
 
 add_executable(run_tests ${TEST_SOURCES}
@@ -29,6 +31,8 @@ add_executable(run_tests ${TEST_SOURCES}
     ${PROJECT_SOURCE_DIR}/src/event.cpp
     ${PROJECT_SOURCE_DIR}/src/snapshot.cpp
     ${PROJECT_SOURCE_DIR}/src/replay_engine.cpp
+    ${PROJECT_SOURCE_DIR}/src/account.cpp
+    ${PROJECT_SOURCE_DIR}/src/position_manager.cpp
 )
 
 # Link with explicit library paths for macOS

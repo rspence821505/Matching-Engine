@@ -1,5 +1,4 @@
-#ifndef SNAPSHOT_HPP
-#define SNAPSHOT_HPP
+#pragma once
 
 #include "fill.hpp"
 #include "order.hpp"
@@ -39,5 +38,3 @@ struct Snapshot {
   bool validate() const;
   void print_summary() const;
 };
-
-#endif // SNAPSHOT_HPP

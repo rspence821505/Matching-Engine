@@ -1,5 +1,4 @@
-#ifndef EVENT_HPP
-#define EVENT_HPP
+#pragma once
 
 #include "types.hpp"
 #include <string>
@@ -99,5 +98,3 @@ inline EventType string_to_event_type(const std::string &str) {
     return EventType::FILL;
   throw std::runtime_error("Unknown event type: " + str);
 }
-
-#endif // EVENT_HPP

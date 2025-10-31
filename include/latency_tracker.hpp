@@ -1,5 +1,4 @@
-#ifndef LATENCY_TRACKER_HPP
-#define LATENCY_TRACKER_HPP
+#pragma once
 
 #include <vector>
 
@@ -14,5 +13,3 @@ public:
   void record(long long latency_ns);
   void print_statistics();
 };
-
-#endif // LATENCY_TRACKER_HPP

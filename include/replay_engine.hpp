@@ -1,5 +1,4 @@
-#ifndef REPLAY_ENGINE_HPP
-#define REPLAY_ENGINE_HPP
+#pragma once
 
 #include "event.hpp"
 #include "order_book.hpp"
@@ -55,5 +54,3 @@ private:
   void replay_event(const OrderEvent &event);
   void print_progress(size_t current, size_t total);
 };
-
-#endif // REPLAY_ENGINE_HPP

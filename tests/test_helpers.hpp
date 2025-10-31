@@ -1,6 +1,5 @@
 // tests/test_helpers.hpp
-#ifndef TEST_HELPERS_HPP
-#define TEST_HELPERS_HPP
+#pragma once
 
 #include "order_book.hpp"
 #include <gtest/gtest.h>
@@ -85,5 +84,3 @@ protected:
     ASSERT_TRUE(order.has_value());                                            \
     EXPECT_EQ(order->state, expected_state);                                   \
   } while (0)
-
-#endif // TEST_HELPERS_HPP

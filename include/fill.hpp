@@ -1,5 +1,4 @@
-#ifndef FILL_HPP
-#define FILL_HPP
+#pragma once
 
 #include "types.hpp"
 #include <iostream>
@@ -15,5 +14,3 @@ struct Fill {
 
   friend std::ostream &operator<<(std::ostream &os, const Fill &f);
 };
-
-#endif // FILL_HPP

@@ -1,5 +1,4 @@
-#ifndef ORDER_HPP
-#define ORDER_HPP
+#pragma once
 
 #include "types.hpp"
 #include <iostream>
@@ -71,5 +70,3 @@ struct BidComparator {
 struct AskComparator {
   bool operator()(const Order &a, const Order &b) const;
 };
-
-#endif // ORDER_HPP
