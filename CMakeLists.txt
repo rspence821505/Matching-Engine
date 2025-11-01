@@ -20,6 +20,10 @@ set(SOURCES
     src/fill.cpp
     src/latency_tracker.cpp
     src/order_book.cpp
+    src/order_book_matching.cpp
+    src/order_book_stops.cpp
+    src/order_book_reporting.cpp
+    src/order_book_persistence.cpp
     src/event.cpp
     src/snapshot.cpp
     src/replay_engine.cpp
@@ -44,4 +48,3 @@ endif()
 
 # Installation rules
 install(TARGETS matching_engine DESTINATION bin)
-

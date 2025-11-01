@@ -29,6 +29,10 @@ add_executable(run_tests ${TEST_SOURCES}
     ${PROJECT_SOURCE_DIR}/src/fill.cpp
     ${PROJECT_SOURCE_DIR}/src/latency_tracker.cpp
     ${PROJECT_SOURCE_DIR}/src/order_book.cpp
+    ${PROJECT_SOURCE_DIR}/src/order_book_matching.cpp
+    ${PROJECT_SOURCE_DIR}/src/order_book_stops.cpp
+    ${PROJECT_SOURCE_DIR}/src/order_book_reporting.cpp
+    ${PROJECT_SOURCE_DIR}/src/order_book_persistence.cpp
     ${PROJECT_SOURCE_DIR}/src/event.cpp
     ${PROJECT_SOURCE_DIR}/src/snapshot.cpp
     ${PROJECT_SOURCE_DIR}/src/replay_engine.cpp
