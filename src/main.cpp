@@ -1,182 +1,309 @@
-#include "position_manager.hpp"
+#include "strategies.hpp"
+#include <chrono>
+#include <iomanip>
 #include <iostream>
+#include <memory>
+#include <random>
+#include <thread>
+
+// Simulate market data for testing
+class MarketDataSimulator {
+private:
+  std::mt19937 rng_;
+  std::normal_distribution<> price_dist_;
+  std::unordered_map<std::string, double> prices_;
+
+public:
+  MarketDataSimulator(unsigned seed = 42) : rng_(seed), price_dist_(0.0, 0.5) {
+
+    // Initialize starting prices
+    prices_["AAPL"] = 150.0;
+    prices_["MSFT"] = 300.0;
+    prices_["GOOGL"] = 140.0;
+  }
+
+  MarketDataSnapshot generate_snapshot(const std::string &symbol) {
+    MarketDataSnapshot snapshot;
+    snapshot.symbol = symbol;
+    snapshot.timestamp = Clock::now();
+
+    // Update price with random walk
+    double &price = prices_[symbol];
+    price += price_dist_(rng_);
+    price = std::max(price, 10.0); // Floor at $10
+
+    snapshot.last_price = price;
+    snapshot.bid_price = price - 0.01;
+    snapshot.ask_price = price + 0.01;
+    snapshot.bid_size = 100;
+    snapshot.ask_size = 100;
+    snapshot.spread = 0.02;
+
+    return snapshot;
+  }
+
+  void add_trend(const std::string &symbol, double trend_pct) {
+    prices_[symbol] *= (1.0 + trend_pct / 100.0);
+  }
+};
 
 int main() {
-  std::cout << "╔════════════════════════════════════════════════════════════╗"
+  std::cout << "╔══════════════════════════════════════════════════════════╗"
             << std::endl;
-  std::cout << "║         ACCOUNT MANAGEMENT SYSTEM DEMO                     ║"
+  std::cout << "║           STRATEGY FRAMEWORK DEMONSTRATION               ║"
             << std::endl;
-  std::cout << "╚════════════════════════════════════════════════════════════╝"
-            << std::endl;
-
-  // Create position manager with 1 basis point fees (0.01%)
-  PositionManager pm(0.0001);
-
-  // ========================================================================
-  // PHASE 1: Create Accounts
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 1: Creating Trading Accounts" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  pm.create_account(1, "Momentum Trader", 100000.0);
-  pm.create_account(2, "Market Maker", 250000.0);
-  pm.create_account(3, "Arbitrage Fund", 500000.0);
-
-  // ========================================================================
-  // PHASE 2: Set Risk Limits
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 2: Setting Risk Limits" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  pm.set_risk_limits(1, 50000, 10000, 3.0);
-  pm.enable_risk_limits(1);
-
-  // ========================================================================
-  // PHASE 3: Simulate Trading Activity
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 3: Simulating Trading Activity" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  // Set initial prices
-  pm.update_price("AAPL", 150.0);
-  pm.update_price("MSFT", 300.0);
-  pm.update_price("GOOGL", 140.0);
-
-  // Trade 1: Account 1 buys AAPL from Account 2
-  std::cout << "\n--- Trade 1: Momentum Trader buys AAPL from Market Maker ---"
-            << std::endl;
-  Fill fill1(1, 2, 150.0, 100);
-  pm.process_fill(fill1, 1, 2, "AAPL");
-
-  // Trade 2: Account 1 buys more AAPL from Account 3
-  std::cout << "\n--- Trade 2: Momentum Trader adds to AAPL position ---"
-            << std::endl;
-  Fill fill2(1, 3, 152.0, 50);
-  pm.process_fill(fill2, 1, 3, "AAPL");
-
-  // Trade 3: Account 2 buys MSFT from Account 3
-  std::cout << "\n--- Trade 3: Market Maker buys MSFT ---" << std::endl;
-  Fill fill3(2, 3, 300.0, 75);
-  pm.process_fill(fill3, 2, 3, "MSFT");
-
-  // Trade 4: Account 1 sells half AAPL position to Account 3 (taking profit)
-  std::cout << "\n--- Trade 4: Momentum Trader takes profit on AAPL ---"
-            << std::endl;
-  pm.update_price("AAPL", 155.0); // Price moved up
-  Fill fill4(3, 1, 155.0, 75);
-  pm.process_fill(fill4, 3, 1, "AAPL");
-
-  // Trade 5: Account 2 buys GOOGL
-  std::cout << "\n--- Trade 5: Market Maker buys GOOGL ---" << std::endl;
-  Fill fill5(2, 3, 140.0, 100);
-  pm.process_fill(fill5, 2, 3, "GOOGL");
-
-  // Trade 6: Account 3 buys MSFT (building position)
-  std::cout << "\n--- Trade 6: Arbitrage Fund buys MSFT ---" << std::endl;
-  Fill fill6(3, 2, 302.0, 50);
-  pm.process_fill(fill6, 3, 2, "MSFT");
-
-  // ========================================================================
-  // PHASE 4: Mark-to-Market Price Updates
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 4: Market Price Updates" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  std::cout << "\nUpdating market prices..." << std::endl;
-  pm.update_price("AAPL", 158.0);  // +5.3% from entry
-  pm.update_price("MSFT", 305.0);  // +1.7% from entry
-  pm.update_price("GOOGL", 138.0); // -1.4% from entry
-
-  std::cout << "Current prices:" << std::endl;
-  std::cout << "  AAPL:  $158.00" << std::endl;
-  std::cout << "  MSFT:  $305.00" << std::endl;
-  std::cout << "  GOOGL: $138.00" << std::endl;
-
-  // ========================================================================
-  // PHASE 5: Account Summaries
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 5: Account Performance Reports" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  pm.print_account_summary(1);
-  std::cout << "\n" << std::string(60, '-') << std::endl;
-  pm.print_account_summary(2);
-  std::cout << "\n" << std::string(60, '-') << std::endl;
-  pm.print_account_summary(3);
-
-  // ========================================================================
-  // PHASE 6: Aggregate Analysis
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 6: Multi-Account Analysis" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  pm.print_positions_summary();
-  pm.print_aggregate_statistics();
-
-  // ========================================================================
-  // PHASE 7: Risk Limit Testing
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 7: Risk Limit Validation" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  std::cout << "\nChecking if Account 1 can take 500 shares of AAPL @ $158:"
-            << std::endl;
-  bool risk_ok = pm.check_risk_limits(1, "AAPL", 500, 158.0);
-  std::cout << "Risk check result: " << (risk_ok ? "APPROVED" : "REJECTED")
+  std::cout << "╚══════════════════════════════════════════════════════════╝"
             << std::endl;
 
   // ========================================================================
-  // PHASE 8: Export Results
+  // PHASE 1: Create Strategy Configurations
   // ========================================================================
   std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 8: Exporting Results" << std::endl;
+  std::cout << "PHASE 1: Creating Strategy Configurations" << std::endl;
   std::cout << std::string(60, '=') << std::endl;
 
-  pm.export_account_summary(1, "account_1_summary.txt");
-  pm.export_all_accounts("all_accounts_summary.txt");
+  // Momentum Strategy Config
+  StrategyConfig momentum_config;
+  momentum_config.name = "Momentum Trader";
+  momentum_config.account_id = 1;
+  momentum_config.symbols = {"AAPL", "MSFT"};
+  momentum_config.max_position_size = 500;
+  momentum_config.enabled = true;
+  momentum_config.set_parameter("lookback_period", 20);
+  momentum_config.set_parameter("entry_threshold", 2.0);
+  momentum_config.set_parameter("exit_threshold", -0.5);
+  momentum_config.set_parameter("take_profit", 5.0);
+  momentum_config.set_parameter("stop_loss", 2.0);
+
+  // Mean Reversion Strategy Config
+  StrategyConfig mean_reversion_config;
+  mean_reversion_config.name = "Mean Reversion";
+  mean_reversion_config.account_id = 2;
+  mean_reversion_config.symbols = {"GOOGL"};
+  mean_reversion_config.max_position_size = 300;
+  mean_reversion_config.enabled = true;
+  mean_reversion_config.set_parameter("lookback_period", 20);
+  mean_reversion_config.set_parameter("entry_std_devs", 2.0);
+  mean_reversion_config.set_parameter("exit_std_devs", 0.5);
+  mean_reversion_config.set_parameter("position_size_pct", 100.0);
+
+  // Market Maker Strategy Config
+  StrategyConfig market_maker_config;
+  market_maker_config.name = "Market Maker";
+  market_maker_config.account_id = 3;
+  market_maker_config.symbols = {"AAPL"};
+  market_maker_config.max_position_size = 1000;
+  market_maker_config.enabled = false; // Start disabled for this demo
+  market_maker_config.set_parameter("spread_bps", 10);
+  market_maker_config.set_parameter("inventory_limit", 500);
+  market_maker_config.set_parameter("quote_size", 100);
+  market_maker_config.set_parameter("skew_factor", 0.1);
 
   // ========================================================================
-  // PHASE 9: Performance Metrics Detail
+  // PHASE 2: Instantiate Strategies
   // ========================================================================
   std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 9: Detailed Performance Breakdown" << std::endl;
+  std::cout << "PHASE 2: Instantiating Strategies" << std::endl;
   std::cout << std::string(60, '=') << std::endl;
 
-  for (int account_id : pm.get_all_account_ids()) {
-    const Account &account = pm.get_account(account_id);
-    std::cout << "\n--- " << account.name << " ---" << std::endl;
-    account.print_performance_metrics();
+  std::vector<std::unique_ptr<Strategy>> strategies;
+
+  strategies.push_back(std::make_unique<MomentumStrategy>(momentum_config));
+  strategies.push_back(
+      std::make_unique<MeanReversionStrategy>(mean_reversion_config));
+  strategies.push_back(
+      std::make_unique<MarketMakerStrategy>(market_maker_config));
+
+  // Initialize all strategies
+  for (auto &strategy : strategies) {
+    strategy->initialize();
   }
+
+  // ========================================================================
+  // PHASE 3: Simulate Market Data & Generate Signals
+  // ========================================================================
+  std::cout << "\n" << std::string(60, '=') << std::endl;
+  std::cout << "PHASE 3: Market Data Simulation" << std::endl;
+  std::cout << std::string(60, '=') << std::endl;
+
+  MarketDataSimulator market_sim;
+  const int num_ticks = 100;
+
+  std::cout << "\nSimulating " << num_ticks << " market data ticks...\n"
+            << std::endl;
+
+  for (int i = 0; i < num_ticks; ++i) {
+    // Add some trends to make it interesting
+    if (i == 30) {
+      std::cout << "\n>>> Adding upward trend to AAPL <<<\n" << std::endl;
+      market_sim.add_trend("AAPL", 3.0); // +3%
+    }
+    if (i == 50) {
+      std::cout << "\n>>> Adding downward trend to GOOGL <<<\n" << std::endl;
+      market_sim.add_trend("GOOGL", -2.5); // -2.5%
+    }
+    if (i == 70) {
+      std::cout << "\n>>> Adding upward trend to MSFT <<<\n" << std::endl;
+      market_sim.add_trend("MSFT", 2.0); // +2%
+    }
+
+    // Generate market data for each symbol
+    for (const auto &symbol : {"AAPL", "MSFT", "GOOGL"}) {
+      MarketDataSnapshot snapshot = market_sim.generate_snapshot(symbol);
+
+      // Feed to all strategies
+      for (auto &strategy : strategies) {
+        if (strategy->is_enabled()) {
+          strategy->on_market_data(snapshot);
+        }
+      }
+    }
+
+    // Periodic signal generation (every 10 ticks)
+    if (i % 10 == 0 && i > 20) {
+      std::cout << "\n--- Tick " << i << " - Generating Signals ---"
+                << std::endl;
+
+      for (auto &strategy : strategies) {
+        if (!strategy->is_enabled())
+          continue;
+
+        auto signals = strategy->generate_signals();
+
+        if (!signals.empty()) {
+          std::cout << "\n[" << strategy->get_name() << "] Generated "
+                    << signals.size() << " signal(s):" << std::endl;
+
+          for (const auto &signal : signals) {
+            std::cout << "  " << signal.type_to_string() << " " << signal.symbol
+                      << " | Confidence: " << std::fixed << std::setprecision(2)
+                      << signal.confidence << " | Reason: " << signal.reason
+                      << std::endl;
+
+            // Convert signals to orders
+            auto orders = strategy->signals_to_orders({signal});
+
+            std::cout << "    → Generated " << orders.size() << " order(s)"
+                      << std::endl;
+
+            // Simulate fills (simplified)
+            if (!orders.empty()) {
+              for (const auto &order : orders) {
+                Fill simulated_fill(order.id,
+                                    order.id + 1000, // Simulated counterparty
+                                    order.price > 0 ? order.price : 150.0,
+                                    order.quantity);
+
+                strategy->on_fill(simulated_fill);
+
+                // Update strategy position
+                int current_pos = strategy->get_position(signal.symbol);
+                int new_pos = current_pos;
+
+                if (order.side == Side::BUY) {
+                  new_pos += order.quantity;
+                } else {
+                  new_pos -= order.quantity;
+                }
+
+                strategy->update_position(signal.symbol, new_pos);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Small delay for readability
+    if ((i + 1) % 10 == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+  }
+
+  // ========================================================================
+  // PHASE 4: Strategy Performance Reports
+  // ========================================================================
+  std::cout << "\n" << std::string(60, '=') << std::endl;
+  std::cout << "PHASE 4: Strategy Performance Summary" << std::endl;
+  std::cout << std::string(60, '=') << std::endl;
+
+  for (const auto &strategy : strategies) {
+    strategy->print_summary();
+    strategy->print_positions();
+    std::cout << std::endl;
+  }
+
+  // ========================================================================
+  // PHASE 5: Strategy Control Demonstration
+  // ========================================================================
+  std::cout << "\n" << std::string(60, '=') << std::endl;
+  std::cout << "PHASE 5: Strategy Control Features" << std::endl;
+  std::cout << std::string(60, '=') << std::endl;
+
+  std::cout << "\nDemonstrating enable/disable functionality:" << std::endl;
+
+  auto &momentum = strategies[0];
+  std::cout << "\n"
+            << momentum->get_name() << " is currently: "
+            << (momentum->is_enabled() ? "ENABLED" : "DISABLED") << std::endl;
+
+  momentum->disable();
+  std::cout << "After disable(): "
+            << (momentum->is_enabled() ? "ENABLED" : "DISABLED") << std::endl;
+
+  momentum->enable();
+  std::cout << "After enable(): "
+            << (momentum->is_enabled() ? "ENABLED" : "DISABLED") << std::endl;
+
+  // ========================================================================
+  // PHASE 6: Individual Strategy Features
+  // ========================================================================
+  std::cout << "\n" << std::string(60, '=') << std::endl;
+  std::cout << "PHASE 6: Strategy-Specific Features" << std::endl;
+  std::cout << std::string(60, '=') << std::endl;
+
+  std::cout << "\nMomentum Strategy - Price History:" << std::endl;
+  const auto &aapl_history = momentum->get_price_history("AAPL");
+  if (aapl_history.size() >= 5) {
+    std::cout << "Last 5 prices for AAPL: ";
+    for (size_t i = aapl_history.size() - 5; i < aapl_history.size(); ++i) {
+      std::cout << std::fixed << std::setprecision(2) << aapl_history[i] << " ";
+    }
+    std::cout << std::endl;
+  }
+
+  std::cout << "\nMean Reversion Strategy - Current Positions:" << std::endl;
+  auto &mean_rev = strategies[1];
+  mean_rev->print_positions();
 
   // ========================================================================
   // Summary
   // ========================================================================
-  std::cout
-      << "\n╔════════════════════════════════════════════════════════════╗"
-      << std::endl;
-  std::cout << "║                   DEMO COMPLETE                            ║"
+  std::cout << "\n╔══════════════════════════════════════════════════════════╗"
             << std::endl;
-  std::cout << "╚════════════════════════════════════════════════════════════╝"
+  std::cout << "║                 DEMO COMPLETE                            ║"
+            << std::endl;
+  std::cout << "╚══════════════════════════════════════════════════════════╝"
             << std::endl;
 
   std::cout << "\nKey Features Demonstrated:" << std::endl;
-  std::cout << "  ✓ Multi-account position tracking" << std::endl;
-  std::cout << "  ✓ Real-time P&L calculation (realized + unrealized)"
-            << std::endl;
-  std::cout << "  ✓ Transaction cost modeling (fees)" << std::endl;
-  std::cout << "  ✓ Position averaging and FIFO accounting" << std::endl;
-  std::cout << "  ✓ Risk limit enforcement" << std::endl;
-  std::cout << "  ✓ Performance metrics (win rate, profit factor, ROI)"
-            << std::endl;
-  std::cout << "  ✓ Aggregate portfolio analysis" << std::endl;
-  std::cout << "  ✓ Export capabilities" << std::endl;
+  std::cout << "  ✓ Strategy configuration with parameters" << std::endl;
+  std::cout << "  ✓ Multiple concurrent strategies" << std::endl;
+  std::cout << "  ✓ Market data callbacks" << std::endl;
+  std::cout << "  ✓ Signal generation logic" << std::endl;
+  std::cout << "  ✓ Signal to order conversion" << std::endl;
+  std::cout << "  ✓ Fill processing and position tracking" << std::endl;
+  std::cout << "  ✓ Risk limit checks" << std::endl;
+  std::cout << "  ✓ Performance statistics" << std::endl;
+  std::cout << "  ✓ Enable/disable controls" << std::endl;
+  std::cout << "  ✓ Price history and technical indicators" << std::endl;
+
+  std::cout << "\nNext Steps:" << std::endl;
+  std::cout << "  1. Integrate with OrderBook for real matching" << std::endl;
+  std::cout << "  2. Link with PositionManager for P&L tracking" << std::endl;
+  std::cout << "  3. Create TradingSimulator orchestration layer" << std::endl;
+  std::cout << "  4. Add more strategy implementations" << std::endl;
+  std::cout << "  5. Implement backtesting framework" << std::endl;
 
   return 0;
 }
