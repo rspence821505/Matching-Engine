@@ -67,7 +67,7 @@ TEST_F(PersistenceTest, CheckpointRecovery) {
 }
 
 TEST_F(PersistenceTest, SnapshotWithIcebergOrders) {
-  book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
+  book->add_order(Order(1, 7001, Side::SELL, 100.0, 500, 100));
 
   book->save_snapshot(snapshot_file);
 
@@ -82,7 +82,7 @@ TEST_F(PersistenceTest, SnapshotWithIcebergOrders) {
 }
 
 TEST_F(PersistenceTest, SnapshotWithStopOrders) {
-  book->add_order(Order{1, Side::SELL, 98.0, 100, true});
+  book->add_order(Order(1, 7002, Side::SELL, 98.0, 100, true));
 
   book->save_snapshot(snapshot_file);
 

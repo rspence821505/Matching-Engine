@@ -2,6 +2,7 @@
 #pragma once
 
 #include "order_book.hpp"
+#include <cmath>
 #include <gtest/gtest.h>
 #include <memory>
 
@@ -15,13 +16,17 @@ protected:
   void TearDown() override { book.reset(); }
 
   // Helper: Add a simple limit order
-  void add_limit_order(int id, Side side, double price, int qty) {
-    book->add_order(Order{id, side, price, qty});
+  void add_limit_order(int id, Side side, double price, int qty,
+                       int account_id = 2000,
+                       TimeInForce tif = TimeInForce::GTC) {
+    book->add_order(Order(id, account_id + id, side, price, qty, tif));
   }
 
   // Helper: Add a market order
-  void add_market_order(int id, Side side, int qty) {
-    book->add_order(Order{id, side, OrderType::MARKET, qty});
+  void add_market_order(int id, Side side, int qty, int account_id = 3000,
+                        TimeInForce tif = TimeInForce::IOC) {
+    book->add_order(
+        Order(id, account_id + id, side, OrderType::MARKET, qty, tif));
   }
 
   // Helper: Get pending stop count

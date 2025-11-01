@@ -34,11 +34,13 @@ add_executable(run_tests ${TEST_SOURCES}
     ${PROJECT_SOURCE_DIR}/src/order_book_reporting.cpp
     ${PROJECT_SOURCE_DIR}/src/order_book_persistence.cpp
     ${PROJECT_SOURCE_DIR}/src/event.cpp
+    ${PROJECT_SOURCE_DIR}/src/performance_metrics.cpp
     ${PROJECT_SOURCE_DIR}/src/snapshot.cpp
     ${PROJECT_SOURCE_DIR}/src/replay_engine.cpp
     ${PROJECT_SOURCE_DIR}/src/account.cpp
     ${PROJECT_SOURCE_DIR}/src/position_manager.cpp
 )
+target_compile_definitions(run_tests PRIVATE PERF_TEST_GTEST)
 
 # Link with explicit library paths for macOS
 if(APPLE)

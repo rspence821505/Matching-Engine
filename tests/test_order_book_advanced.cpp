@@ -353,10 +353,10 @@ TEST_F(OrderBookTest, AmendFilledOrder) {
 
 TEST_F(OrderBookTest, IcebergMeetsStopOrder) {
   // Iceberg order in book
-  book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
+  book->add_order(Order(1, 6001, Side::SELL, 100.0, 500, 100));
 
   // Stop order set below current price
-  book->add_order(Order{2, Side::SELL, 98.0, 100, true});
+  book->add_order(Order(2, 6002, Side::SELL, 98.0, 100, true));
 
   // Trade that triggers stop
   add_limit_order(3, Side::BUY, 98.0, 50);
@@ -370,7 +370,7 @@ TEST_F(OrderBookTest, MarketOrderWithIOC) {
 
   // Market order with IOC
   book->add_order(
-      Order{2, Side::BUY, OrderType::MARKET, 100, TimeInForce::IOC});
+      Order(2, 6003, Side::BUY, OrderType::MARKET, 100, TimeInForce::IOC));
 
   // Should fill 50, cancel 50
   EXPECT_EQ(fill_count(), 1);
@@ -384,7 +384,7 @@ TEST_F(OrderBookTest, MarketOrderWithFOK) {
 
   // Market order with FOK for 100 shares
   book->add_order(
-      Order{2, Side::BUY, OrderType::MARKET, 100, TimeInForce::FOK});
+      Order(2, 6004, Side::BUY, OrderType::MARKET, 100, TimeInForce::FOK));
 
   // Should be rejected (not enough liquidity)
   EXPECT_EQ(fill_count(), 0);

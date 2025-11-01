@@ -21,9 +21,9 @@ TEST_F(ReplayTest, ReplayDeterminism) {
   book->enable_logging();
 
   // Execute some orders
-  book->add_order(Order{1, Side::BUY, 100.0, 100});
-  book->add_order(Order{2, Side::SELL, 100.0, 50});
-  book->add_order(Order{3, Side::SELL, 100.0, 50});
+  book->add_order(Order(1, 5001, Side::BUY, 100.0, 100));
+  book->add_order(Order(2, 5002, Side::SELL, 100.0, 50));
+  book->add_order(Order(3, 5003, Side::SELL, 100.0, 50));
 
   auto original_fills = book->get_fills();
 
@@ -49,8 +49,8 @@ TEST_F(ReplayTest, ReplayDeterminism) {
 TEST_F(ReplayTest, ReplayManualControl) {
   book->enable_logging();
 
-  book->add_order(Order{1, Side::BUY, 100.0, 100});
-  book->add_order(Order{2, Side::SELL, 100.0, 100});
+  book->add_order(Order(1, 5001, Side::BUY, 100.0, 100));
+  book->add_order(Order(2, 5002, Side::SELL, 100.0, 100));
 
   book->save_events(events_file);
 
@@ -69,8 +69,8 @@ TEST_F(ReplayTest, ReplayManualControl) {
 TEST_F(ReplayTest, ReplayValidation) {
   book->enable_logging();
 
-  book->add_order(Order{1, Side::BUY, 100.0, 100});
-  book->add_order(Order{2, Side::SELL, 100.0, 100});
+  book->add_order(Order(1, 5001, Side::BUY, 100.0, 100));
+  book->add_order(Order(2, 5002, Side::SELL, 100.0, 100));
 
   auto original_fills = book->get_fills();
   book->save_events(events_file);

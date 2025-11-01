@@ -3,7 +3,7 @@
 
 TEST_F(OrderBookTest, StopLossTrigger) {
   // Add stop-sell at 98.0
-  book->add_order(Order{1, Side::SELL, 98.0, 100, true});
+  book->add_order(Order(1, 7101, Side::SELL, 98.0, 100, true));
 
   EXPECT_EQ(pending_stop_count_int(), 1);
   assert_empty_book(); // Not in active book yet
@@ -18,7 +18,7 @@ TEST_F(OrderBookTest, StopLossTrigger) {
 
 TEST_F(OrderBookTest, StopBuyTrigger) {
   // Add stop-buy at 102.0
-  book->add_order(Order{1, Side::BUY, 102.0, 100, true});
+  book->add_order(Order(1, 7102, Side::BUY, 102.0, 100, true));
 
   EXPECT_EQ(pending_stop_count_int(), 1);
 
@@ -31,7 +31,7 @@ TEST_F(OrderBookTest, StopBuyTrigger) {
 
 TEST_F(OrderBookTest, StopLimitOrder) {
   // Stop-limit: trigger at 102.0, then place limit at 101.5
-  book->add_order(Order{1, Side::BUY, 102.0, 101.5, 150});
+  book->add_order(Order(1, 7103, Side::BUY, 102.0, 101.5, 150));
 
   EXPECT_EQ(pending_stop_count_int(), 1);
 
@@ -50,7 +50,7 @@ TEST_F(OrderBookTest, StopLimitOrder) {
 
 TEST_F(OrderBookTest, StopDoesNotTriggerOnWrongPrice) {
   // Stop-sell at 98.0
-  book->add_order(Order{1, Side::SELL, 98.0, 100, true});
+  book->add_order(Order(1, 7104, Side::SELL, 98.0, 100, true));
 
   // Trade above stop price shouldn't trigger
   add_limit_order(2, Side::BUY, 100.0, 50);
@@ -60,8 +60,8 @@ TEST_F(OrderBookTest, StopDoesNotTriggerOnWrongPrice) {
 }
 
 TEST_F(OrderBookTest, MultipleStopsTrigger) {
-  book->add_order(Order{1, Side::SELL, 98.0, 100, true});
-  book->add_order(Order{2, Side::SELL, 97.0, 100, true});
+  book->add_order(Order(1, 7105, Side::SELL, 98.0, 100, true));
+  book->add_order(Order(2, 7106, Side::SELL, 97.0, 100, true));
 
   EXPECT_EQ(book->pending_stop_count(), 2);
 

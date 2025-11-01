@@ -3,7 +3,7 @@
 
 TEST_F(OrderBookTest, IcebergOrderBasic) {
   // 500 total, 100 display
-  book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
+  book->add_order(Order(1, 7201, Side::SELL, 100.0, 500, 100));
 
   auto ask = book->get_best_ask();
   ASSERT_TRUE(ask.has_value());
@@ -13,7 +13,7 @@ TEST_F(OrderBookTest, IcebergOrderBasic) {
 }
 
 TEST_F(OrderBookTest, IcebergPartialMatch) {
-  book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
+  book->add_order(Order(1, 7202, Side::SELL, 100.0, 500, 100));
   add_limit_order(2, Side::BUY, 100.0, 50); // Match 50 of display
 
   EXPECT_EQ(fill_count_int(), 1);
@@ -28,7 +28,7 @@ TEST_F(OrderBookTest, IcebergPartialMatch) {
 }
 
 TEST_F(OrderBookTest, IcebergRefreshAfterDisplayExhausted) {
-  book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
+  book->add_order(Order(1, 7203, Side::SELL, 100.0, 500, 100));
   add_limit_order(2, Side::BUY, 100.0, 100); // Exhaust display
 
   EXPECT_EQ(fill_count_int(), 1);
@@ -42,7 +42,7 @@ TEST_F(OrderBookTest, IcebergRefreshAfterDisplayExhausted) {
 }
 
 TEST_F(OrderBookTest, IcebergLosesTimePriorityOnRefresh) {
-  book->add_order(Order{1, Side::SELL, 100.0, 500, 100});
+  book->add_order(Order(1, 7204, Side::SELL, 100.0, 500, 100));
   add_limit_order(2, Side::SELL, 100.0, 50); // Regular order at same price
 
   add_limit_order(3, Side::BUY, 100.0, 100); // Exhaust iceberg display
@@ -57,7 +57,7 @@ TEST_F(OrderBookTest, IcebergLosesTimePriorityOnRefresh) {
 }
 
 TEST_F(OrderBookTest, IcebergFullyFilled) {
-  book->add_order(Order{1, Side::SELL, 100.0, 200, 100});
+  book->add_order(Order(1, 7205, Side::SELL, 100.0, 200, 100));
   add_limit_order(2, Side::BUY, 100.0, 200); // Fill entire iceberg
 
   EXPECT_EQ(fill_count(), 2);              // Two partial fills
@@ -69,7 +69,7 @@ TEST_F(OrderBookTest, IcebergFullyFilled) {
 }
 
 TEST_F(OrderBookTest, IcebergWithSmallRemainder) {
-  book->add_order(Order{1, Side::SELL, 100.0, 250, 100});
+  book->add_order(Order(1, 7206, Side::SELL, 100.0, 250, 100));
   add_limit_order(2, Side::BUY, 100.0, 100); // Exhaust display
 
   // After refresh, should show only 50 (not full peak size)
@@ -89,8 +89,8 @@ TEST_F(OrderBookTest, IcebergWithSmallRemainder) {
 }
 
 TEST_F(OrderBookTest, MultipleIcebergOrders) {
-  book->add_order(Order{1, Side::SELL, 100.0, 300, 100});
-  book->add_order(Order{2, Side::SELL, 100.0, 200, 50});
+  book->add_order(Order(1, 7207, Side::SELL, 100.0, 300, 100));
+  book->add_order(Order(2, 7208, Side::SELL, 100.0, 200, 50));
 
   add_limit_order(3, Side::BUY, 100.0, 120);
 

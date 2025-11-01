@@ -25,8 +25,10 @@ set(SOURCES
     src/order_book_reporting.cpp
     src/order_book_persistence.cpp
     src/event.cpp
+    src/performance_metrics.cpp
     src/snapshot.cpp
     src/replay_engine.cpp
+    src/position_manager.cpp
     src/main.cpp
 )
 

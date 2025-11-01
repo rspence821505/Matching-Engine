@@ -2,7 +2,7 @@
 #include "test_helpers.hpp"
 
 TEST_F(OrderBookTest, GTCOrderRestsInBook) {
-  book->add_order(Order{1, Side::BUY, 100.0, 100, TimeInForce::GTC});
+  book->add_order(Order(1, 4001, Side::BUY, 100.0, 100, TimeInForce::GTC));
 
   // No match, should rest in book
   assert_book_has_orders(1, 0);
@@ -14,7 +14,7 @@ TEST_F(OrderBookTest, GTCOrderRestsInBook) {
 
 TEST_F(OrderBookTest, IOCFullyFilled) {
   add_limit_order(1, Side::SELL, 100.0, 100);
-  book->add_order(Order{2, Side::BUY, 100.0, 100, TimeInForce::IOC});
+  book->add_order(Order(2, 4002, Side::BUY, 100.0, 100, TimeInForce::IOC));
 
   EXPECT_EQ(fill_count(), 1);
   EXPECT_ORDER_STATE(2, OrderState::FILLED);
@@ -22,7 +22,7 @@ TEST_F(OrderBookTest, IOCFullyFilled) {
 
 TEST_F(OrderBookTest, IOCPartiallyFilled) {
   add_limit_order(1, Side::SELL, 100.0, 50);
-  book->add_order(Order{2, Side::BUY, 100.0, 100, TimeInForce::IOC});
+  book->add_order(Order(2, 4002, Side::BUY, 100.0, 100, TimeInForce::IOC));
 
   EXPECT_EQ(fill_count(), 1);
   EXPECT_TRUE(has_fill(2, 1, 100.0, 50));
@@ -36,7 +36,7 @@ TEST_F(OrderBookTest, IOCPartiallyFilled) {
 }
 
 TEST_F(OrderBookTest, IOCNoFill) {
-  book->add_order(Order{1, Side::BUY, 100.0, 100, TimeInForce::IOC});
+  book->add_order(Order(1, 4003, Side::BUY, 100.0, 100, TimeInForce::IOC));
 
   EXPECT_EQ(fill_count_int(), 0);
 
@@ -47,7 +47,7 @@ TEST_F(OrderBookTest, IOCNoFill) {
 
 TEST_F(OrderBookTest, FOKFullyFilled) {
   add_limit_order(1, Side::SELL, 100.0, 100);
-  book->add_order(Order{2, Side::BUY, 100.0, 100, TimeInForce::FOK});
+  book->add_order(Order(2, 4004, Side::BUY, 100.0, 100, TimeInForce::FOK));
 
   EXPECT_EQ(fill_count(), 1);
   EXPECT_ORDER_STATE(2, OrderState::FILLED);
@@ -56,7 +56,7 @@ TEST_F(OrderBookTest, FOKFullyFilled) {
 TEST_F(OrderBookTest, FOKInsufficientLiquidity) {
   add_limit_order(1, Side::SELL, 100.0, 50); // Only 50 available
   book->add_order(
-      Order{2, Side::BUY, 100.0, 100, TimeInForce::FOK}); // Wants 100
+      Order(2, 4005, Side::BUY, 100.0, 100, TimeInForce::FOK));
 
   EXPECT_EQ(fill_count_int(), 0); // All-or-nothing: no fill
 
@@ -73,14 +73,14 @@ TEST_F(OrderBookTest, FOKMultipleLevels) {
   add_limit_order(2, Side::SELL, 100.5, 50);
 
   // FOK for 100 should fill across both levels
-  book->add_order(Order{3, Side::BUY, 101.0, 100, TimeInForce::FOK});
+  book->add_order(Order(3, 4006, Side::BUY, 101.0, 100, TimeInForce::FOK));
 
   EXPECT_EQ(fill_count(), 2);
   EXPECT_ORDER_STATE(3, OrderState::FILLED);
 }
 
 TEST_F(OrderBookTest, DAYOrderRestsInBook) {
-  book->add_order(Order{1, Side::BUY, 100.0, 100, TimeInForce::DAY});
+  book->add_order(Order(1, 4007, Side::BUY, 100.0, 100, TimeInForce::DAY));
 
   assert_book_has_orders(1, 0);
 

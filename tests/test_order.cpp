@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 TEST(OrderTest, LimitOrderCreation) {
-  Order order(1, Side::BUY, 100.0, 200);
+  Order order(1, 1001, Side::BUY, 100.0, 200);
 
   EXPECT_EQ(order.id, 1);
   EXPECT_EQ(order.side, Side::BUY);
@@ -16,7 +16,7 @@ TEST(OrderTest, LimitOrderCreation) {
 }
 
 TEST(OrderTest, MarketOrderCreation) {
-  Order order(2, Side::SELL, OrderType::MARKET, 100);
+  Order order(2, 1002, Side::SELL, OrderType::MARKET, 100);
 
   EXPECT_EQ(order.id, 2);
   EXPECT_EQ(order.side, Side::SELL);
@@ -26,7 +26,7 @@ TEST(OrderTest, MarketOrderCreation) {
 }
 
 TEST(OrderTest, IcebergOrderCreation) {
-  Order order(3, Side::BUY, 100.0, 500, 100); // 500 total, 100 display
+  Order order(3, 1003, Side::BUY, 100.0, 500, 100);
 
   EXPECT_TRUE(order.is_iceberg());
   EXPECT_EQ(order.quantity, 500);
@@ -36,7 +36,7 @@ TEST(OrderTest, IcebergOrderCreation) {
 }
 
 TEST(OrderTest, IcebergRefresh) {
-  Order order(4, Side::BUY, 100.0, 500, 100);
+  Order order(4, 1004, Side::BUY, 100.0, 500, 100);
 
   // Exhaust display quantity
   order.display_qty = 0;
@@ -53,7 +53,7 @@ TEST(OrderTest, IcebergRefresh) {
 
 TEST(OrderTest, StopOrderCreation) {
   // Stop-market order
-  Order stop_market(5, Side::SELL, 98.0, 100, true);
+  Order stop_market(5, 1005, Side::SELL, 98.0, 100, true);
 
   EXPECT_TRUE(stop_market.is_stop_order());
   EXPECT_DOUBLE_EQ(stop_market.stop_price, 98.0);
@@ -61,7 +61,7 @@ TEST(OrderTest, StopOrderCreation) {
   EXPECT_EQ(stop_market.stop_becomes, OrderType::MARKET);
 
   // Stop-limit order
-  Order stop_limit(6, Side::BUY, 102.0, 101.5, 150);
+  Order stop_limit(6, 1006, Side::BUY, 102.0, 101.5, 150);
 
   EXPECT_TRUE(stop_limit.is_stop_order());
   EXPECT_DOUBLE_EQ(stop_limit.stop_price, 102.0);
@@ -70,7 +70,7 @@ TEST(OrderTest, StopOrderCreation) {
 }
 
 TEST(OrderTest, OrderStateTransitions) {
-  Order order(7, Side::BUY, 100.0, 100);
+  Order order(7, 1007, Side::BUY, 100.0, 100);
 
   EXPECT_EQ(order.state, OrderState::PENDING);
   EXPECT_FALSE(order.is_active());
@@ -86,22 +86,22 @@ TEST(OrderTest, OrderStateTransitions) {
 }
 
 TEST(OrderTest, TimeInForce) {
-  Order gtc(1, Side::BUY, 100.0, 100, TimeInForce::GTC);
+  Order gtc(1, 1010, Side::BUY, 100.0, 100, TimeInForce::GTC);
   EXPECT_TRUE(gtc.can_rest_in_book());
 
-  Order ioc(2, Side::BUY, 100.0, 100, TimeInForce::IOC);
+  Order ioc(2, 1011, Side::BUY, 100.0, 100, TimeInForce::IOC);
   EXPECT_FALSE(ioc.can_rest_in_book());
 
-  Order fok(3, Side::BUY, 100.0, 100, TimeInForce::FOK);
+  Order fok(3, 1012, Side::BUY, 100.0, 100, TimeInForce::FOK);
   EXPECT_FALSE(fok.can_rest_in_book());
 
-  Order day(4, Side::BUY, 100.0, 100, TimeInForce::DAY);
+  Order day(4, 1013, Side::BUY, 100.0, 100, TimeInForce::DAY);
   EXPECT_TRUE(day.can_rest_in_book());
 }
 
 TEST(OrderTest, BidComparator) {
-  Order high_price(1, Side::BUY, 101.0, 100);
-  Order low_price(2, Side::BUY, 100.0, 100);
+  Order high_price(1, 1020, Side::BUY, 101.0, 100);
+  Order low_price(2, 1021, Side::BUY, 100.0, 100);
 
   BidComparator comp;
 
@@ -111,8 +111,8 @@ TEST(OrderTest, BidComparator) {
 }
 
 TEST(OrderTest, AskComparator) {
-  Order low_price(1, Side::SELL, 100.0, 100);
-  Order high_price(2, Side::SELL, 101.0, 100);
+  Order low_price(1, 1030, Side::SELL, 100.0, 100);
+  Order high_price(2, 1031, Side::SELL, 101.0, 100);
 
   AskComparator comp;
 
