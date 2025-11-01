@@ -212,14 +212,15 @@ void ReplayEngine::replay_event(const OrderEvent &event) {
   switch (event.type) {
   case EventType::NEW_ORDER:
     if (event.peak_size > 0) {
-      book_.add_order(Order{event.order_id, event.side, event.price,
-                            event.quantity, event.peak_size, event.tif});
+      book_.add_order(Order(event.order_id, event.account_id, event.side,
+                            event.price, event.quantity, event.peak_size,
+                            event.tif));
     } else if (event.order_type == OrderType::MARKET) {
-      book_.add_order(Order{event.order_id, event.side, event.order_type,
-                            event.quantity, event.tif});
+      book_.add_order(Order(event.order_id, event.account_id, event.side,
+                            event.order_type, event.quantity, event.tif));
     } else {
-      book_.add_order(Order{event.order_id, event.side, event.price,
-                            event.quantity, event.tif});
+      book_.add_order(Order(event.order_id, event.account_id, event.side,
+                            event.price, event.quantity, event.tif));
     }
     break;
 

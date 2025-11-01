@@ -101,9 +101,12 @@ Strategy::signals_to_orders(const std::vector<TradingSignal> &signals) {
     int order_id = generate_order_id();
 
     // If target_price is 0 or very close to 0, make it a market order
-    Order order = (std::abs(signal.target_price) < 0.01)
-                      ? Order(order_id, side, OrderType::MARKET, quantity)
-                      : Order(order_id, side, signal.target_price, quantity);
+    Order order =
+        (std::abs(signal.target_price) < 0.01)
+            ? Order(order_id, config_.account_id, side, OrderType::MARKET,
+                    quantity)
+            : Order(order_id, config_.account_id, side, signal.target_price,
+                    quantity);
 
     orders.push_back(order);
     track_order(order);

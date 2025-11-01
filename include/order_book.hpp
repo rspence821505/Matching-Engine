@@ -11,6 +11,19 @@
 #include <unordered_map>
 #include <vector>
 
+// NEW: Structure to track account ownership of fills
+struct AccountFill {
+  Fill fill;
+  int buy_account_id;
+  int sell_account_id;
+  std::string symbol; // NEW: Also track symbol for each fill
+
+  AccountFill(const Fill &f, int buy_acct, int sell_acct,
+              const std::string &sym)
+      : fill(f), buy_account_id(buy_acct), sell_account_id(sell_acct),
+        symbol(sym) {}
+};
+
 class OrderBook {
 private:
   std::priority_queue<Order, std::vector<Order>, BidComparator> bids_;
@@ -18,6 +31,7 @@ private:
   std::unordered_map<int, Order> active_orders_;    // id -> order
   std::unordered_map<int, Order> cancelled_orders_; // id -> order
   std::vector<Fill> fills_;
+  std::vector<AccountFill> account_fills_; // NEW: Track fills with account info
   std::vector<long long> insertion_latencies_ns_;
 
   void execute_trade(Order &aggressive_order, Order &passive_order);
@@ -50,6 +64,9 @@ private:
 
   size_t snapshot_counter_;
 
+  // NEW: Symbol tracking for multi-instrument support
+  std::string current_symbol_; // Can be set per order book instance
+
   struct PriceLevel {
     double price;
     int total_quantity;
@@ -59,33 +76,52 @@ private:
   std::vector<PriceLevel> get_bid_levels(int max_levels) const;
   std::vector<PriceLevel> get_ask_levels(int max_levels) const;
 
-  // ===========================
-  // NEW: helpers for the fixes
-  // ===========================
-  double current_trigger_price_for_side(Side side) const; // NEW
-  bool stop_should_trigger_now(const Order &o) const;     // NEW
-  void trigger_stop_order_immediately(Order &stop_order,
-                                      double ref_price); // NEW
-  void finalize_after_matching(Order &o);                // NEW
+  // Helpers for stop triggers & post-match finalization
+  double current_trigger_price_for_side(Side side) const;
+  bool stop_should_trigger_now(const Order &o) const;
+  void trigger_stop_order_immediately(Order &stop_order, double ref_price);
+  void finalize_after_matching(Order &o);
 
 public:
-  OrderBook();
+  OrderBook(const std::string &symbol = "DEFAULT");
 
-  // Operational methods
+  // ==================================================================
+  // OPERATIONAL METHODS
+  // ==================================================================
+
   void add_order(Order o);
   std::optional<Order> get_best_bid() const;
   std::optional<Order> get_best_ask() const;
   std::optional<double> get_spread() const;
   const std::vector<Fill> &get_fills() const;
 
-  // Order lifecycle management methods
+  // NEW: Get fills with account information
+  const std::vector<AccountFill> &get_account_fills() const;
+
+  // NEW: Get fills for a specific account
+  std::vector<AccountFill> get_fills_for_account(int account_id) const;
+
+  // NEW: Set/get the symbol this order book handles
+  void set_symbol(const std::string &symbol) { current_symbol_ = symbol; }
+  std::string get_symbol() const { return current_symbol_; }
+
+  // ==================================================================
+  // ORDER LIFECYCLE MANAGEMENT
+  // ==================================================================
+
   bool cancel_order(int order_id);
   bool amend_order(int order_id, std::optional<double> new_price,
                    std::optional<int> new_quantity);
   std::optional<Order> get_order(int order_id) const;
   void check_stop_triggers(double trade_price);
 
-  // Snapshot and recovery
+  // NEW: Get order's account
+  std::optional<int> get_order_account(int order_id) const;
+
+  // ==================================================================
+  // SNAPSHOT AND RECOVERY
+  // ==================================================================
+
   Snapshot create_snapshot() const;
   void restore_from_snapshot(const Snapshot &snapshot);
   void save_snapshot(const std::string &filename) const;
@@ -97,7 +133,10 @@ public:
   void recover_from_checkpoint(const std::string &snapshot_file,
                                const std::string &events_file);
 
-  // Event logging control
+  // ==================================================================
+  // EVENT LOGGING CONTROL
+  // ==================================================================
+
   void enable_logging() { logging_enabled_ = true; }
   void disable_logging() { logging_enabled_ = false; }
   bool is_logging() const { return logging_enabled_; }
@@ -110,8 +149,12 @@ public:
   // Get events for validation
   const std::vector<OrderEvent> &get_events() const { return event_log_; }
 
-  // Statistics and display methods
+  // ==================================================================
+  // STATISTICS AND DISPLAY METHODS
+  // ==================================================================
+
   void print_fills() const;
+  void print_account_fills() const; // NEW: Print fills with account info
   void print_top_of_book() const;
   void print_latency_stats() const;
   void print_match_stats() const;

@@ -3,22 +3,24 @@
 #include <iostream>
 #include <stdexcept>
 
-// Existing constructor for LIMIT orders - add stop initialization
-Order::Order(int id_, Side side_, double price_, int qty_, TimeInForce tif_)
-    : id(id_), side(side_), type(OrderType::LIMIT), tif(tif_), price(price_),
-      quantity(qty_), remaining_qty(qty_), display_qty(qty_), hidden_qty(0),
-      peak_size(0), timestamp(Clock::now()), state(OrderState::PENDING),
-      is_stop(false), stop_price(0), stop_triggered(false), // NEW
-      stop_becomes(OrderType::LIMIT) {}                     // NEW
+// Constructor for LIMIT orders
+Order::Order(int id_, int account_id_, Side side_, double price_, int qty_,
+             TimeInForce tif_)
+    : id(id_), account_id(account_id_), side(side_), type(OrderType::LIMIT),
+      tif(tif_), price(price_), quantity(qty_), remaining_qty(qty_),
+      display_qty(qty_), hidden_qty(0), peak_size(0), timestamp(Clock::now()),
+      state(OrderState::PENDING), is_stop(false), stop_price(0),
+      stop_triggered(false), stop_becomes(OrderType::LIMIT) {}
 
-// Existing constructor for MARKET orders - add stop initialization
-Order::Order(int id_, Side side_, OrderType type_, int qty_, TimeInForce tif_)
-    : id(id_), side(side_), type(type_), tif(tif_),
+// Constructor for MARKET orders
+Order::Order(int id_, int account_id_, Side side_, OrderType type_, int qty_,
+             TimeInForce tif_)
+    : id(id_), account_id(account_id_), side(side_), type(type_), tif(tif_),
       price(side == Side::BUY ? std::numeric_limits<double>::infinity() : 0.0),
       quantity(qty_), remaining_qty(qty_), display_qty(qty_), hidden_qty(0),
       peak_size(0), timestamp(Clock::now()), state(OrderState::PENDING),
-      is_stop(false), stop_price(0), stop_triggered(false), // NEW
-      stop_becomes(OrderType::MARKET) {                     // NEW
+      is_stop(false), stop_price(0), stop_triggered(false),
+      stop_becomes(OrderType::MARKET) {
   if (type_ != OrderType::MARKET) {
     throw std::runtime_error("Use the other constructor for limit orders");
   }
@@ -27,16 +29,15 @@ Order::Order(int id_, Side side_, OrderType type_, int qty_, TimeInForce tif_)
   }
 }
 
-// Existing constructor for ICEBERG - add stop initialization
-Order::Order(int id_, Side side_, double price_, int total_qty, int peak_size_,
-             TimeInForce tif_)
-    : id(id_), side(side_), type(OrderType::LIMIT), tif(tif_), price(price_),
-      quantity(total_qty), remaining_qty(total_qty),
+// Constructor for ICEBERG orders
+Order::Order(int id_, int account_id_, Side side_, double price_, int total_qty,
+             int peak_size_, TimeInForce tif_)
+    : id(id_), account_id(account_id_), side(side_), type(OrderType::LIMIT),
+      tif(tif_), price(price_), quantity(total_qty), remaining_qty(total_qty),
       display_qty(std::min(peak_size_, total_qty)),
       hidden_qty(std::max(0, total_qty - peak_size_)), peak_size(peak_size_),
       timestamp(Clock::now()), state(OrderState::PENDING), is_stop(false),
-      stop_price(0), stop_triggered(false), // NEW
-      stop_becomes(OrderType::LIMIT) {      // NEW
+      stop_price(0), stop_triggered(false), stop_becomes(OrderType::LIMIT) {
 
   if (peak_size_ <= 0) {
     throw std::runtime_error("Peak size must be positive");
@@ -49,9 +50,10 @@ Order::Order(int id_, Side side_, double price_, int total_qty, int peak_size_,
 }
 
 // Constructor for STOP-MARKET orders
-Order::Order(int id_, Side side_, double stop_price_, int qty_,
+Order::Order(int id_, int account_id_, Side side_, double stop_price_, int qty_,
              bool is_stop_market, TimeInForce tif_)
-    : id(id_), side(side_), type(OrderType::MARKET), tif(tif_),
+    : id(id_), account_id(account_id_), side(side_), type(OrderType::MARKET),
+      tif(tif_),
       price(side == Side::BUY ? std::numeric_limits<double>::infinity() : 0.0),
       quantity(qty_), remaining_qty(qty_), display_qty(qty_), hidden_qty(0),
       peak_size(0), timestamp(Clock::now()), state(OrderState::PENDING),
@@ -65,10 +67,10 @@ Order::Order(int id_, Side side_, double stop_price_, int qty_,
 }
 
 // Constructor for STOP-LIMIT orders
-Order::Order(int id_, Side side_, double stop_price_, double limit_price_,
-             int qty_, TimeInForce tif_)
-    : id(id_), side(side_), type(OrderType::LIMIT), tif(tif_),
-      price(limit_price_), quantity(qty_), remaining_qty(qty_),
+Order::Order(int id_, int account_id_, Side side_, double stop_price_,
+             double limit_price_, int qty_, TimeInForce tif_)
+    : id(id_), account_id(account_id_), side(side_), type(OrderType::LIMIT),
+      tif(tif_), price(limit_price_), quantity(qty_), remaining_qty(qty_),
       display_qty(qty_), hidden_qty(0), peak_size(0), timestamp(Clock::now()),
       state(OrderState::PENDING), is_stop(true), stop_price(stop_price_),
       stop_triggered(false), stop_becomes(OrderType::LIMIT) {}
@@ -84,8 +86,9 @@ void Order::trigger_stop() {
   timestamp = Clock::now(); // New timestamp when triggered
   type = stop_becomes;      // Becomes MARKET or LIMIT
 
-  std::cout << "Stop order " << id << " triggered at $" << std::fixed
-            << std::setprecision(2) << stop_price << " → "
+  std::cout << "Stop order " << id << " (Account " << account_id
+            << ") triggered at $" << std::fixed << std::setprecision(2)
+            << stop_price << " → "
             << (type == OrderType::MARKET ? "MARKET" : "LIMIT") << " "
             << side_to_string() << std::endl;
 }
@@ -120,9 +123,9 @@ void Order::refresh_display() {
     hidden_qty -= reveal;
     timestamp = Clock::now(); // Loses time priority!
 
-    std::cout << "Iceberg order " << id << " refreshed: showing " << display_qty
-              << " more shares (" << hidden_qty << " still hidden)"
-              << std::endl;
+    std::cout << "Iceberg order " << id << " (Account " << account_id
+              << ") refreshed: showing " << display_qty << " more shares ("
+              << hidden_qty << " still hidden)" << std::endl;
   }
 }
 
@@ -169,7 +172,7 @@ std::string Order::state_to_string() const {
 }
 
 std::ostream &operator<<(std::ostream &os, const Order &o) {
-  os << "Order{id=" << o.id;
+  os << "Order{id=" << o.id << ", acct=" << o.account_id; // SHOW ACCOUNT
 
   // Show if it's a stop order
   if (o.is_stop && !o.stop_triggered) {

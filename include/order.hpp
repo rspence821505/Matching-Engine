@@ -6,6 +6,7 @@
 
 struct Order {
   int id;
+  int account_id; // NEW: Track which account owns this order
   Side side;
   OrderType type;    // LIMIT or MARKET
   TimeInForce tif;   // Time-in-Force
@@ -25,24 +26,24 @@ struct Order {
   OrderType stop_becomes; // Becomes LIMIT or MARKET when triggered
 
   // Constructor for LIMIT orders
-  Order(int id_, Side side_, double price_, int qty_,
+  Order(int id_, int account_id_, Side side_, double price_, int qty_,
         TimeInForce tif_ = TimeInForce::GTC);
 
   // Constructor for MARKET orders
-  Order(int id_, Side side_, OrderType type_, int qty_,
+  Order(int id_, int account_id_, Side side_, OrderType type_, int qty_,
         TimeInForce tif_ = TimeInForce::IOC);
 
   // Constructor for ICEBERG orders
-  Order(int id_, Side side_, double price_, int total_qty, int peak_size_,
-        TimeInForce tif_ = TimeInForce::GTC);
+  Order(int id_, int account_id_, Side side_, double price_, int total_qty,
+        int peak_size_, TimeInForce tif_ = TimeInForce::GTC);
 
   // Constructor for STOP-MARKET orders
-  Order(int id_, Side side_, double stop_price_, int qty_, bool is_stop_market,
-        TimeInForce tif_ = TimeInForce::GTC);
+  Order(int id_, int account_id_, Side side_, double stop_price_, int qty_,
+        bool is_stop_market, TimeInForce tif_ = TimeInForce::GTC);
 
   // Constructor for STOP-LIMIT orders
-  Order(int id_, Side side_, double stop_price_, double limit_price_, int qty_,
-        TimeInForce tif_ = TimeInForce::GTC);
+  Order(int id_, int account_id_, Side side_, double stop_price_,
+        double limit_price_, int qty_, TimeInForce tif_ = TimeInForce::GTC);
 
   bool is_filled() const;
   bool is_active() const;

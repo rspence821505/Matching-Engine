@@ -1,309 +1,247 @@
-#include "strategies.hpp"
-#include <chrono>
+#include "order.hpp"
+#include "order_book.hpp"
+#include "position_manager.hpp"
 #include <iomanip>
 #include <iostream>
-#include <memory>
-#include <random>
-#include <thread>
 
-// Simulate market data for testing
-class MarketDataSimulator {
+// ============================================================================
+// DEMONSTRATION: Account Tracking in OrderBook
+// ============================================================================
+
+class TradingDemo {
 private:
-  std::mt19937 rng_;
-  std::normal_distribution<> price_dist_;
-  std::unordered_map<std::string, double> prices_;
+  OrderBook order_book_;
+  PositionManager position_manager_;
+  int next_order_id_;
 
 public:
-  MarketDataSimulator(unsigned seed = 42) : rng_(seed), price_dist_(0.0, 0.5) {
+  TradingDemo(const std::string &symbol)
+      : order_book_(symbol), next_order_id_(1) {}
 
-    // Initialize starting prices
-    prices_["AAPL"] = 150.0;
-    prices_["MSFT"] = 300.0;
-    prices_["GOOGL"] = 140.0;
+  void setup_accounts() {
+    std::cout << "╔════════════════════════════════════════════════════════╗"
+              << std::endl;
+    std::cout << "║        SETTING UP TRADING ACCOUNTS                    ║"
+              << std::endl;
+    std::cout << "╚════════════════════════════════════════════════════════╝"
+              << std::endl;
+    std::cout << std::endl;
+
+    // Create three different accounts
+    position_manager_.create_account(101, "Momentum Trader", 1000000.0);
+    position_manager_.create_account(102, "Market Maker", 500000.0);
+    position_manager_.create_account(103, "Arbitrage Fund", 2000000.0);
   }
 
-  MarketDataSnapshot generate_snapshot(const std::string &symbol) {
-    MarketDataSnapshot snapshot;
-    snapshot.symbol = symbol;
-    snapshot.timestamp = Clock::now();
+  void demonstrate_basic_trading() {
+    std::cout << "\n" << std::string(60, '=') << std::endl;
+    std::cout << "SCENARIO 1: Basic Two-Account Trade" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
 
-    // Update price with random walk
-    double &price = prices_[symbol];
-    price += price_dist_(rng_);
-    price = std::max(price, 10.0); // Floor at $10
+    // Account 101 wants to buy
+    Order buy_order(next_order_id_++, 101, Side::BUY, 150.0, 100);
+    std::cout << "\n[Account 101] Placing buy order: " << buy_order
+              << std::endl;
+    order_book_.add_order(buy_order);
 
-    snapshot.last_price = price;
-    snapshot.bid_price = price - 0.01;
-    snapshot.ask_price = price + 0.01;
-    snapshot.bid_size = 100;
-    snapshot.ask_size = 100;
-    snapshot.spread = 0.02;
+    // Account 102 wants to sell
+    Order sell_order(next_order_id_++, 102, Side::SELL, 150.0, 100);
+    std::cout << "[Account 102] Placing sell order: " << sell_order
+              << std::endl;
+    order_book_.add_order(sell_order);
 
-    return snapshot;
+    // Process fills
+    process_fills();
+
+    // Show results
+    std::cout << "\n--- Results ---" << std::endl;
+    order_book_.print_account_fills();
+    position_manager_.print_positions_summary();
   }
 
-  void add_trend(const std::string &symbol, double trend_pct) {
-    prices_[symbol] *= (1.0 + trend_pct / 100.0);
+  void demonstrate_multi_account_trading() {
+    std::cout << "\n" << std::string(60, '=') << std::endl;
+    std::cout << "SCENARIO 2: Multi-Account Market Activity" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
+
+    // Multiple accounts placing orders
+    std::cout << "\n[Phase 1] Building order book..." << std::endl;
+
+    // Market maker (102) provides liquidity on both sides
+    Order mm_bid(next_order_id_++, 102, Side::BUY, 149.50, 200);
+    Order mm_ask(next_order_id_++, 102, Side::SELL, 150.50, 200);
+    std::cout << "  Market Maker (102) providing liquidity" << std::endl;
+    order_book_.add_order(mm_bid);
+    order_book_.add_order(mm_ask);
+
+    // Arbitrage fund (103) places large order
+    Order arb_buy(next_order_id_++, 103, Side::BUY, 150.00, 500);
+    std::cout << "  Arbitrage Fund (103) buying 500 shares" << std::endl;
+    order_book_.add_order(arb_buy);
+
+    // Momentum trader (101) hits the ask
+    Order momentum_buy(next_order_id_++, 101, Side::BUY, 151.00, 150);
+    std::cout << "  Momentum Trader (101) aggressively buying" << std::endl;
+    order_book_.add_order(momentum_buy);
+
+    // Process all fills
+    process_fills();
+
+    // Show market state
+    std::cout << "\n--- Market State ---" << std::endl;
+    order_book_.print_top_of_book();
+    order_book_.print_account_fills();
+
+    // Show account positions
+    std::cout << "\n--- Account Positions ---" << std::endl;
+    position_manager_.print_all_accounts();
+  }
+
+  void demonstrate_account_specific_queries() {
+    std::cout << "\n" << std::string(60, '=') << std::endl;
+    std::cout << "SCENARIO 3: Account-Specific Queries" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
+
+    // Query fills for specific account
+    std::cout << "\nFills for Account 101:" << std::endl;
+    auto fills_101 = order_book_.get_fills_for_account(101);
+    std::cout << "  Total fills: " << fills_101.size() << std::endl;
+    for (const auto &af : fills_101) {
+      std::cout << "  - " << af.fill.quantity << " shares @ $" << std::fixed
+                << std::setprecision(2) << af.fill.price;
+      if (af.buy_account_id == 101) {
+        std::cout << " (BOUGHT from Account " << af.sell_account_id << ")";
+      } else {
+        std::cout << " (SOLD to Account " << af.buy_account_id << ")";
+      }
+      std::cout << std::endl;
+    }
+
+    std::cout << "\nFills for Account 102:" << std::endl;
+    auto fills_102 = order_book_.get_fills_for_account(102);
+    std::cout << "  Total fills: " << fills_102.size() << std::endl;
+    for (const auto &af : fills_102) {
+      std::cout << "  - " << af.fill.quantity << " shares @ $" << std::fixed
+                << std::setprecision(2) << af.fill.price;
+      if (af.buy_account_id == 102) {
+        std::cout << " (BOUGHT from Account " << af.sell_account_id << ")";
+      } else {
+        std::cout << " (SOLD to Account " << af.buy_account_id << ")";
+      }
+      std::cout << std::endl;
+    }
+  }
+
+  void demonstrate_order_lookup() {
+    std::cout << "\n" << std::string(60, '=') << std::endl;
+    std::cout << "SCENARIO 4: Order Account Lookup" << std::endl;
+    std::cout << std::string(60, '=') << std::endl;
+
+    // Place an order and query it
+    int test_order_id = next_order_id_++;
+    Order test_order(test_order_id, 103, Side::BUY, 145.0, 50);
+
+    std::cout << "\nPlacing order ID " << test_order_id << " for Account 103"
+              << std::endl;
+    order_book_.add_order(test_order);
+
+    // Look up which account owns this order
+    auto account = order_book_.get_order_account(test_order_id);
+    if (account) {
+      std::cout << "✓ Order " << test_order_id << " belongs to Account "
+                << *account << std::endl;
+    } else {
+      std::cout << "✗ Order not found" << std::endl;
+    }
+
+    // Try canceling from wrong account (hypothetical auth check)
+    std::cout << "\nAttempting to cancel order " << test_order_id << "..."
+              << std::endl;
+    if (account && *account == 103) {
+      std::cout << "✓ Authorization check passed (order belongs to Account 103)"
+                << std::endl;
+      order_book_.cancel_order(test_order_id);
+      std::cout << "✓ Order cancelled successfully" << std::endl;
+    }
+  }
+
+private:
+  void process_fills() {
+    const auto &account_fills = order_book_.get_account_fills();
+    static size_t last_processed = 0;
+
+    // Process only new fills
+    for (size_t i = last_processed; i < account_fills.size(); ++i) {
+      const auto &af = account_fills[i];
+
+      // Update current price for this symbol
+      position_manager_.update_price(af.symbol, af.fill.price);
+
+      // Route fill to appropriate accounts
+      position_manager_.process_fill(af.fill, af.buy_account_id,
+                                     af.sell_account_id, af.symbol);
+    }
+
+    last_processed = account_fills.size();
   }
 };
 
+// ============================================================================
+// MAIN DEMONSTRATION
+// ============================================================================
+
 int main() {
-  std::cout << "╔══════════════════════════════════════════════════════════╗"
+  std::cout << "╔════════════════════════════════════════════════════════╗"
             << std::endl;
-  std::cout << "║           STRATEGY FRAMEWORK DEMONSTRATION               ║"
+  std::cout << "║   ORDERBOOK ACCOUNT TRACKING DEMONSTRATION            ║"
             << std::endl;
-  std::cout << "╚══════════════════════════════════════════════════════════╝"
-            << std::endl;
-
-  // ========================================================================
-  // PHASE 1: Create Strategy Configurations
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 1: Creating Strategy Configurations" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  // Momentum Strategy Config
-  StrategyConfig momentum_config;
-  momentum_config.name = "Momentum Trader";
-  momentum_config.account_id = 1;
-  momentum_config.symbols = {"AAPL", "MSFT"};
-  momentum_config.max_position_size = 500;
-  momentum_config.enabled = true;
-  momentum_config.set_parameter("lookback_period", 20);
-  momentum_config.set_parameter("entry_threshold", 2.0);
-  momentum_config.set_parameter("exit_threshold", -0.5);
-  momentum_config.set_parameter("take_profit", 5.0);
-  momentum_config.set_parameter("stop_loss", 2.0);
-
-  // Mean Reversion Strategy Config
-  StrategyConfig mean_reversion_config;
-  mean_reversion_config.name = "Mean Reversion";
-  mean_reversion_config.account_id = 2;
-  mean_reversion_config.symbols = {"GOOGL"};
-  mean_reversion_config.max_position_size = 300;
-  mean_reversion_config.enabled = true;
-  mean_reversion_config.set_parameter("lookback_period", 20);
-  mean_reversion_config.set_parameter("entry_std_devs", 2.0);
-  mean_reversion_config.set_parameter("exit_std_devs", 0.5);
-  mean_reversion_config.set_parameter("position_size_pct", 100.0);
-
-  // Market Maker Strategy Config
-  StrategyConfig market_maker_config;
-  market_maker_config.name = "Market Maker";
-  market_maker_config.account_id = 3;
-  market_maker_config.symbols = {"AAPL"};
-  market_maker_config.max_position_size = 1000;
-  market_maker_config.enabled = false; // Start disabled for this demo
-  market_maker_config.set_parameter("spread_bps", 10);
-  market_maker_config.set_parameter("inventory_limit", 500);
-  market_maker_config.set_parameter("quote_size", 100);
-  market_maker_config.set_parameter("skew_factor", 0.1);
-
-  // ========================================================================
-  // PHASE 2: Instantiate Strategies
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 2: Instantiating Strategies" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  std::vector<std::unique_ptr<Strategy>> strategies;
-
-  strategies.push_back(std::make_unique<MomentumStrategy>(momentum_config));
-  strategies.push_back(
-      std::make_unique<MeanReversionStrategy>(mean_reversion_config));
-  strategies.push_back(
-      std::make_unique<MarketMakerStrategy>(market_maker_config));
-
-  // Initialize all strategies
-  for (auto &strategy : strategies) {
-    strategy->initialize();
-  }
-
-  // ========================================================================
-  // PHASE 3: Simulate Market Data & Generate Signals
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 3: Market Data Simulation" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  MarketDataSimulator market_sim;
-  const int num_ticks = 100;
-
-  std::cout << "\nSimulating " << num_ticks << " market data ticks...\n"
+  std::cout << "╚════════════════════════════════════════════════════════╝"
             << std::endl;
 
-  for (int i = 0; i < num_ticks; ++i) {
-    // Add some trends to make it interesting
-    if (i == 30) {
-      std::cout << "\n>>> Adding upward trend to AAPL <<<\n" << std::endl;
-      market_sim.add_trend("AAPL", 3.0); // +3%
-    }
-    if (i == 50) {
-      std::cout << "\n>>> Adding downward trend to GOOGL <<<\n" << std::endl;
-      market_sim.add_trend("GOOGL", -2.5); // -2.5%
-    }
-    if (i == 70) {
-      std::cout << "\n>>> Adding upward trend to MSFT <<<\n" << std::endl;
-      market_sim.add_trend("MSFT", 2.0); // +2%
-    }
+  TradingDemo demo("AAPL");
 
-    // Generate market data for each symbol
-    for (const auto &symbol : {"AAPL", "MSFT", "GOOGL"}) {
-      MarketDataSnapshot snapshot = market_sim.generate_snapshot(symbol);
+  // Setup
+  demo.setup_accounts();
 
-      // Feed to all strategies
-      for (auto &strategy : strategies) {
-        if (strategy->is_enabled()) {
-          strategy->on_market_data(snapshot);
-        }
-      }
-    }
+  // Run scenarios
+  demo.demonstrate_basic_trading();
+  demo.demonstrate_multi_account_trading();
+  demo.demonstrate_account_specific_queries();
+  demo.demonstrate_order_lookup();
 
-    // Periodic signal generation (every 10 ticks)
-    if (i % 10 == 0 && i > 20) {
-      std::cout << "\n--- Tick " << i << " - Generating Signals ---"
-                << std::endl;
-
-      for (auto &strategy : strategies) {
-        if (!strategy->is_enabled())
-          continue;
-
-        auto signals = strategy->generate_signals();
-
-        if (!signals.empty()) {
-          std::cout << "\n[" << strategy->get_name() << "] Generated "
-                    << signals.size() << " signal(s):" << std::endl;
-
-          for (const auto &signal : signals) {
-            std::cout << "  " << signal.type_to_string() << " " << signal.symbol
-                      << " | Confidence: " << std::fixed << std::setprecision(2)
-                      << signal.confidence << " | Reason: " << signal.reason
-                      << std::endl;
-
-            // Convert signals to orders
-            auto orders = strategy->signals_to_orders({signal});
-
-            std::cout << "    → Generated " << orders.size() << " order(s)"
-                      << std::endl;
-
-            // Simulate fills (simplified)
-            if (!orders.empty()) {
-              for (const auto &order : orders) {
-                Fill simulated_fill(order.id,
-                                    order.id + 1000, // Simulated counterparty
-                                    order.price > 0 ? order.price : 150.0,
-                                    order.quantity);
-
-                strategy->on_fill(simulated_fill);
-
-                // Update strategy position
-                int current_pos = strategy->get_position(signal.symbol);
-                int new_pos = current_pos;
-
-                if (order.side == Side::BUY) {
-                  new_pos += order.quantity;
-                } else {
-                  new_pos -= order.quantity;
-                }
-
-                strategy->update_position(signal.symbol, new_pos);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Small delay for readability
-    if ((i + 1) % 10 == 0) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-  }
-
-  // ========================================================================
-  // PHASE 4: Strategy Performance Reports
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 4: Strategy Performance Summary" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  for (const auto &strategy : strategies) {
-    strategy->print_summary();
-    strategy->print_positions();
-    std::cout << std::endl;
-  }
-
-  // ========================================================================
-  // PHASE 5: Strategy Control Demonstration
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 5: Strategy Control Features" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  std::cout << "\nDemonstrating enable/disable functionality:" << std::endl;
-
-  auto &momentum = strategies[0];
-  std::cout << "\n"
-            << momentum->get_name() << " is currently: "
-            << (momentum->is_enabled() ? "ENABLED" : "DISABLED") << std::endl;
-
-  momentum->disable();
-  std::cout << "After disable(): "
-            << (momentum->is_enabled() ? "ENABLED" : "DISABLED") << std::endl;
-
-  momentum->enable();
-  std::cout << "After enable(): "
-            << (momentum->is_enabled() ? "ENABLED" : "DISABLED") << std::endl;
-
-  // ========================================================================
-  // PHASE 6: Individual Strategy Features
-  // ========================================================================
-  std::cout << "\n" << std::string(60, '=') << std::endl;
-  std::cout << "PHASE 6: Strategy-Specific Features" << std::endl;
-  std::cout << std::string(60, '=') << std::endl;
-
-  std::cout << "\nMomentum Strategy - Price History:" << std::endl;
-  const auto &aapl_history = momentum->get_price_history("AAPL");
-  if (aapl_history.size() >= 5) {
-    std::cout << "Last 5 prices for AAPL: ";
-    for (size_t i = aapl_history.size() - 5; i < aapl_history.size(); ++i) {
-      std::cout << std::fixed << std::setprecision(2) << aapl_history[i] << " ";
-    }
-    std::cout << std::endl;
-  }
-
-  std::cout << "\nMean Reversion Strategy - Current Positions:" << std::endl;
-  auto &mean_rev = strategies[1];
-  mean_rev->print_positions();
-
-  // ========================================================================
-  // Summary
-  // ========================================================================
-  std::cout << "\n╔══════════════════════════════════════════════════════════╗"
+  // Final summary
+  std::cout << "\n╔════════════════════════════════════════════════════════╗"
             << std::endl;
-  std::cout << "║                 DEMO COMPLETE                            ║"
+  std::cout << "║                DEMO COMPLETE                           ║"
             << std::endl;
-  std::cout << "╚══════════════════════════════════════════════════════════╝"
+  std::cout << "╚════════════════════════════════════════════════════════╝"
             << std::endl;
 
-  std::cout << "\nKey Features Demonstrated:" << std::endl;
-  std::cout << "  ✓ Strategy configuration with parameters" << std::endl;
-  std::cout << "  ✓ Multiple concurrent strategies" << std::endl;
-  std::cout << "  ✓ Market data callbacks" << std::endl;
-  std::cout << "  ✓ Signal generation logic" << std::endl;
-  std::cout << "  ✓ Signal to order conversion" << std::endl;
-  std::cout << "  ✓ Fill processing and position tracking" << std::endl;
-  std::cout << "  ✓ Risk limit checks" << std::endl;
-  std::cout << "  ✓ Performance statistics" << std::endl;
-  std::cout << "  ✓ Enable/disable controls" << std::endl;
-  std::cout << "  ✓ Price history and technical indicators" << std::endl;
+  std::cout << "\n📊 Key Features Demonstrated:" << std::endl;
+  std::cout << "  ✓ Orders track account ownership" << std::endl;
+  std::cout << "  ✓ Fills automatically route to correct accounts" << std::endl;
+  std::cout << "  ✓ Query fills by account" << std::endl;
+  std::cout << "  ✓ Look up order ownership" << std::endl;
+  std::cout << "  ✓ Multi-account position tracking" << std::endl;
+  std::cout << "  ✓ Automatic P&L calculation per account" << std::endl;
 
-  std::cout << "\nNext Steps:" << std::endl;
-  std::cout << "  1. Integrate with OrderBook for real matching" << std::endl;
-  std::cout << "  2. Link with PositionManager for P&L tracking" << std::endl;
-  std::cout << "  3. Create TradingSimulator orchestration layer" << std::endl;
-  std::cout << "  4. Add more strategy implementations" << std::endl;
-  std::cout << "  5. Implement backtesting framework" << std::endl;
+  std::cout << "\n🎯 Integration Benefits:" << std::endl;
+  std::cout << "  • No manual account tracking needed" << std::endl;
+  std::cout << "  • Fills automatically routed to PositionManager" << std::endl;
+  std::cout << "  • Each account gets accurate P&L" << std::endl;
+  std::cout << "  • Supports authorization checks (order ownership)"
+            << std::endl;
+  std::cout << "  • Ready for multi-strategy trading simulator" << std::endl;
+
+  std::cout << "\n🔧 Next Steps:" << std::endl;
+  std::cout << "  1. Apply updates to your codebase (see "
+               "ACCOUNT_TRACKING_CHANGES.md)"
+            << std::endl;
+  std::cout << "  2. Update all Order() constructor calls to include "
+               "account_id"
+            << std::endl;
+  std::cout << "  3. Test with your existing code" << std::endl;
+  std::cout << "  4. Integrate with TradingSimulator" << std::endl;
 
   return 0;
 }

@@ -21,6 +21,7 @@ set(TEST_SOURCES
     test_replay_engine.cpp
     test_account.cpp
     test_position_manager.cpp
+    test_performance_benchmarks.cpp
 )
 
 add_executable(run_tests ${TEST_SOURCES}

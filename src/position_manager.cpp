@@ -1,4 +1,5 @@
 #include "position_manager.hpp"
+#include "order_book.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -45,6 +46,23 @@ std::vector<int> PositionManager::get_all_account_ids() const {
   }
   std::sort(ids.begin(), ids.end());
   return ids;
+}
+
+void process_fills_from_orderbook(OrderBook &book, PositionManager &pos_mgr) {
+  const auto &account_fills = book.get_account_fills();
+
+  // Process only new fills (track last_processed index)
+  static size_t last_processed = 0;
+
+  for (size_t i = last_processed; i < account_fills.size(); ++i) {
+    const auto &af = account_fills[i];
+
+    // Automatically route to correct accounts!
+    pos_mgr.process_fill(af.fill, af.buy_account_id, af.sell_account_id,
+                         af.symbol);
+  }
+
+  last_processed = account_fills.size();
 }
 
 void PositionManager::process_fill(const Fill &fill, int buy_account_id,

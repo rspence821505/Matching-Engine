@@ -114,7 +114,7 @@ Snapshot Snapshot::load_from_file(const std::string &filename) {
           (type_str == "LIMIT") ? OrderType::LIMIT : OrderType::MARKET;
 
       // Create order with basic constructor
-      Order order(id, side, price, qty);
+      Order order(id, -1, side, price, qty, TimeInForce::GTC);
       order.remaining_qty = remaining;
       order.display_qty = display;
       order.hidden_qty = hidden;
@@ -141,7 +141,8 @@ Snapshot Snapshot::load_from_file(const std::string &filename) {
 
       Side side = (side_str == "BUY") ? Side::BUY : Side::SELL;
 
-      Order order(id, side, stop_price, limit_price, qty);
+      Order order(id, -1, side, stop_price, limit_price, qty,
+                  TimeInForce::GTC);
       snapshot.pending_stops.push_back(order);
     } else if (type == "FILL") {
       // Parse fill

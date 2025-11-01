@@ -13,8 +13,9 @@
 // CONSTRUCTOR
 // ============================================================================
 
-OrderBook::OrderBook()
-    : logging_enabled_(false), last_trade_price_(0), snapshot_counter_(0) {}
+OrderBook::OrderBook(const std::string &symbol)
+    : logging_enabled_(false), last_trade_price_(0), snapshot_counter_(0),
+      current_symbol_(symbol) {}
 
 // ============================================================================
 //  HELPERS (for stop triggers & post-match finalization)
@@ -204,10 +205,11 @@ void OrderBook::add_order(Order o) {
     if (order.is_iceberg()) {
       event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
                               order.tif, log_price, order.quantity,
-                              order.peak_size);
+                              order.peak_size, order.account_id);
     } else {
       event_log_.emplace_back(order.timestamp, order.id, order.side, order.type,
-                              order.tif, log_price, order.quantity);
+                              order.tif, log_price, order.quantity, 0,
+                              order.account_id);
     }
   }
 
@@ -235,17 +237,21 @@ bool OrderBook::cancel_order(int order_id) {
   Timer timer;
   timer.start();
 
-  if (logging_enabled_) {
-    event_log_.emplace_back(Clock::now(), EventType::CANCEL_ORDER, order_id);
-  }
-
   auto it = active_orders_.find(order_id);
   if (it == active_orders_.end()) {
+    if (logging_enabled_) {
+      event_log_.emplace_back(Clock::now(), EventType::CANCEL_ORDER, order_id);
+    }
     std::cout << "Order " << order_id << " not found or already processed."
               << '\n';
     return false;
   }
   Order &order = it->second;
+
+  if (logging_enabled_) {
+    event_log_.emplace_back(Clock::now(), EventType::CANCEL_ORDER, order_id,
+                            order.account_id);
+  }
 
   if (order.is_filled()) {
     std::cout << "Order " << order_id << " is already filled." << '\n';
@@ -276,17 +282,21 @@ bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
   Timer timer;
   timer.start();
 
-  if (logging_enabled_) {
-    event_log_.emplace_back(Clock::now(), order_id, new_price, new_quantity);
-  }
-
   // Check if order exists
   auto it = active_orders_.find(order_id);
   if (it == active_orders_.end()) {
+    if (logging_enabled_) {
+      event_log_.emplace_back(Clock::now(), order_id, new_price, new_quantity);
+    }
     std::cout << "Order " << order_id << " not found." << '\n';
     return false;
   }
   Order &order = it->second;
+
+  if (logging_enabled_) {
+    event_log_.emplace_back(Clock::now(), order_id, new_price, new_quantity,
+                            order.account_id);
+  }
 
   // Can't amend filled orders
   if (order.is_filled()) {
@@ -303,7 +313,8 @@ bool OrderBook::amend_order(int order_id, std::optional<double> new_price,
   cancel_order(order_id);
 
   // Create new order with same ID
-  Order amended_order(order_id, side, price, quantity);
+  Order amended_order(order_id, order.account_id, side, price, quantity,
+                      order.tif);
 
   // CRITICAL: Use add_order() to trigger matching logic
   add_order(amended_order);
@@ -424,13 +435,25 @@ void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
   int sell_id = (aggressive_order.side == Side::SELL) ? aggressive_order.id
                                                       : passive_order.id;
 
+  // NEW: Extract account IDs
+  int buy_account = (aggressive_order.side == Side::BUY)
+                        ? aggressive_order.account_id
+                        : passive_order.account_id;
+  int sell_account = (aggressive_order.side == Side::SELL)
+                         ? aggressive_order.account_id
+                         : passive_order.account_id;
+
   // Record the fill
   fills_.emplace_back(buy_id, sell_id, trade_price, trade_qty);
+
+  // NEW: Also record with account information
+  account_fills_.emplace_back(fills_.back(), buy_account, sell_account,
+                              current_symbol_);
 
   // Log fill event
   if (logging_enabled_) {
     event_log_.emplace_back(Clock::now(), buy_id, sell_id, trade_price,
-                            trade_qty);
+                            trade_qty, buy_account);
   }
 
   // Update quantities
@@ -443,6 +466,68 @@ void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
 
   // Check for stop order triggers
   check_stop_triggers(trade_price);
+}
+
+// Get fills with account information
+const std::vector<AccountFill> &OrderBook::get_account_fills() const {
+  return account_fills_;
+}
+
+// Get fills for a specific account
+std::vector<AccountFill>
+OrderBook::get_fills_for_account(int account_id) const {
+  std::vector<AccountFill> result;
+
+  for (const auto &af : account_fills_) {
+    if (af.buy_account_id == account_id || af.sell_account_id == account_id) {
+      result.push_back(af);
+    }
+  }
+
+  return result;
+}
+
+// Get order's account
+std::optional<int> OrderBook::get_order_account(int order_id) const {
+  auto it = active_orders_.find(order_id);
+  if (it != active_orders_.end()) {
+    return it->second.account_id;
+  }
+
+  auto cancelled_it = cancelled_orders_.find(order_id);
+  if (cancelled_it != cancelled_orders_.end()) {
+    return cancelled_it->second.account_id;
+  }
+
+  return std::nullopt;
+}
+
+// NEW: Print fills with account information
+void OrderBook::print_account_fills() const {
+  std::cout << "\n=== Fills with Account Information ===" << std::endl;
+
+  if (account_fills_.empty()) {
+    std::cout << "No fills yet." << std::endl;
+    return;
+  }
+
+  std::cout << std::string(90, '-') << std::endl;
+  std::cout << std::left << std::setw(8) << "Buy ID" << std::setw(8) << "B.Acct"
+            << std::setw(8) << "Sell ID" << std::setw(8) << "S.Acct"
+            << std::right << std::setw(10) << "Price" << std::setw(10)
+            << "Quantity" << std::setw(12) << "Symbol" << std::endl;
+  std::cout << std::string(90, '-') << std::endl;
+
+  for (const auto &af : account_fills_) {
+    std::cout << std::left << std::setw(8) << af.fill.buy_order_id
+              << std::setw(8) << af.buy_account_id << std::setw(8)
+              << af.fill.sell_order_id << std::setw(8) << af.sell_account_id
+              << std::right << std::setw(10) << std::fixed
+              << std::setprecision(2) << af.fill.price << std::setw(10)
+              << af.fill.quantity << std::setw(12) << af.symbol << std::endl;
+  }
+
+  std::cout << std::string(90, '-') << std::endl;
 }
 
 // Helper: Update order state in active_orders_ map
