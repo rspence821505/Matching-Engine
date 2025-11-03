@@ -2,6 +2,7 @@
 
 #include "event.hpp"
 #include "fill.hpp"
+#include "fill_router.hpp"
 #include "order.hpp"
 #include "snapshot.hpp"
 #include "timer.hpp"
@@ -33,8 +34,9 @@ private:
   std::vector<Fill> fills_;
   std::vector<AccountFill> account_fills_; // NEW: Track fills with account info
   std::vector<long long> insertion_latencies_ns_;
+  std::unique_ptr<FillRouter> fill_router_;
 
-  void execute_trade(Order &aggressive_order, Order &passive_order);
+  bool execute_trade(Order &aggressive_order, Order &passive_order);
   void update_order_state(Order &order);
   bool can_match(const Order &aggressive, const Order &passive) const;
 
@@ -93,13 +95,33 @@ public:
   std::optional<Order> get_best_bid() const;
   std::optional<Order> get_best_ask() const;
   std::optional<double> get_spread() const;
-  const std::vector<Fill> &get_fills() const;
 
-  // NEW: Get fills with account information
+  // Fill router access
+  FillRouter &get_fill_router() { return *fill_router_; }
+  const FillRouter &get_fill_router() const { return *fill_router_; }
+
+  // Get fills with account information
   const std::vector<AccountFill> &get_account_fills() const;
 
-  // NEW: Get fills for a specific account
+  // Get fills for a specific account
   std::vector<AccountFill> get_fills_for_account(int account_id) const;
+
+  // Configure fill routing
+  void enable_self_trade_prevention(bool enable) {
+    fill_router_->set_self_trade_prevention(enable);
+  }
+
+  void set_fee_schedule(double maker_rate, double taker_rate) {
+    fill_router_->set_fee_schedule(maker_rate, taker_rate);
+  }
+
+  // Get fills with enhanced metadata
+  const std::vector<EnhancedFill> &get_enhanced_fills() const {
+    return fill_router_->get_all_fills();
+  }
+
+  // Keep backward compatibility
+  const std::vector<Fill> &get_fills() const;
 
   // NEW: Set/get the symbol this order book handles
   void set_symbol(const std::string &symbol) { current_symbol_ = symbol; }

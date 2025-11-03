@@ -6,6 +6,32 @@
 TradingSimulator::TradingSimulator()
     : order_book_("SIM"), next_order_id_(1), is_running_(false) {}
 
+// In trading_simulator.cpp or wherever you initialize
+void TradingSimulator::setup() {
+  // Register callback for automatic fill processing
+  order_book_.get_fill_router().register_fill_callback(
+      [this](const EnhancedFill &fill) {
+        position_manager_.process_fill(fill.base_fill, fill.buy_account_id,
+                                       fill.sell_account_id, fill.symbol);
+
+        // Notify strategies
+        for (auto &strategy : strategies_) {
+          if (strategy->get_account_id() == fill.buy_account_id ||
+              strategy->get_account_id() == fill.sell_account_id) {
+            strategy->on_fill(fill.base_fill);
+          }
+        }
+      });
+
+  // Register self-trade notification
+  order_book_.get_fill_router().register_self_trade_callback(
+      [](int account_id, const Order &order1, const Order &order2) {
+        std::cout << "⚠ Self-trade detected for account " << account_id
+                  << " between orders " << order1.id << " and " << order2.id
+                  << std::endl;
+      });
+}
+
 void TradingSimulator::add_strategy(std::unique_ptr<Strategy> strategy) {
   if (!position_manager_.has_account(strategy->get_account_id())) {
     throw std::runtime_error("Account " +

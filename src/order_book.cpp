@@ -8,8 +8,11 @@
 // ============================================================================
 
 OrderBook::OrderBook(const std::string &symbol)
-    : logging_enabled_(false), last_trade_price_(0), snapshot_counter_(0),
-      current_symbol_(symbol) {}
+    : fill_router_(std::make_unique<FillRouter>(true)),
+      logging_enabled_(false), last_trade_price_(0), snapshot_counter_(0),
+      current_symbol_(symbol) {
+  fill_router_->set_self_trade_prevention(true);
+}
 
 // ============================================================================
 //  HELPERS (for stop triggers & post-match finalization)

@@ -74,13 +74,21 @@ bool OrderBook::can_fill_order(const Order &order) const {
   return available_qty >= order.quantity;
 }
 
-void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
-  // Determine available quantity (respect iceberg display limits)
+bool OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
+  // ========================================================================
+  //  DETERMINE TRADE QUANTITY
+  // ========================================================================
+
+  // Respect iceberg display limits for passive order
   int available_qty = passive_order.is_iceberg() ? passive_order.display_qty
                                                  : passive_order.remaining_qty;
 
   int trade_qty = std::min(aggressive_order.remaining_qty, available_qty);
   double trade_price = passive_order.price; // Passive order sets price
+
+  // ========================================================================
+  // IDENTIFY COUNTERPARTIES
+  // ========================================================================
 
   // Determine buy/sell order IDs based on sides
   int buy_id = (aggressive_order.side == Side::BUY) ? aggressive_order.id
@@ -88,7 +96,7 @@ void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
   int sell_id = (aggressive_order.side == Side::SELL) ? aggressive_order.id
                                                       : passive_order.id;
 
-  // NEW: Extract account IDs
+  // Extract account IDs
   int buy_account = (aggressive_order.side == Side::BUY)
                         ? aggressive_order.account_id
                         : passive_order.account_id;
@@ -96,29 +104,95 @@ void OrderBook::execute_trade(Order &aggressive_order, Order &passive_order) {
                          ? aggressive_order.account_id
                          : passive_order.account_id;
 
-  // Record the fill
+  // ========================================================================
+  //  SELF-TRADE CHECK (Optional - controlled by fill router)
+  // ========================================================================
+
+  // The fill router will handle self-trade prevention if enabled
+  // We create the fill first, then let the router decide
+
+  // ========================================================================
+  //  CREATE FILL
+  // ========================================================================
+
+  Fill fill(buy_id, sell_id, trade_price, trade_qty);
+
+  // ========================================================================
+  //  ROUTE THROUGH FILL ROUTER
+  // ========================================================================
+
+  bool fill_accepted = fill_router_->route_fill(fill, aggressive_order,
+                                                passive_order, current_symbol_);
+
+  if (!fill_accepted) {
+    // Fill was rejected (likely self-trade prevention)
+    std::cout << "⚠ Fill rejected: Order " << aggressive_order.id << " x Order "
+              << passive_order.id << " (Account " << aggressive_order.account_id
+              << " self-trade)" << std::endl;
+
+    // Cancel the aggressive order to prevent infinite retries
+    aggressive_order.state = OrderState::CANCELLED;
+    aggressive_order.remaining_qty = 0;
+    auto ag_it = active_orders_.find(aggressive_order.id);
+    if (ag_it != active_orders_.end()) {
+      ag_it->second.state = OrderState::CANCELLED;
+      ag_it->second.remaining_qty = 0;
+    }
+
+    return false;
+  }
+
+  // ========================================================================
+  //  RECORD FILL (BACKWARD COMPATIBILITY)
+  // ========================================================================
+
+  // Keep the old fills_ vector for backward compatibility
   fills_.emplace_back(buy_id, sell_id, trade_price, trade_qty);
 
-  // NEW: Also record with account information
+  // Keep the old account_fills_ vector for backward compatibility
   account_fills_.emplace_back(fills_.back(), buy_account, sell_account,
                               current_symbol_);
 
-  // Log fill event
+  // ========================================================================
+  //  LOG FILL EVENT
+  // ========================================================================
+
   if (logging_enabled_) {
     event_log_.emplace_back(Clock::now(), buy_id, sell_id, trade_price,
                             trade_qty, buy_account);
   }
 
-  // Update quantities
+  // ========================================================================
+  //  UPDATE ORDER QUANTITIES
+  // ========================================================================
+
+  // Update remaining quantities for both orders
   aggressive_order.remaining_qty -= trade_qty;
   passive_order.remaining_qty -= trade_qty;
 
+  // Handle iceberg order display quantity
   if (passive_order.is_iceberg()) {
     passive_order.display_qty -= trade_qty;
   }
 
-  // Check for stop order triggers
+  // ========================================================================
+  //  TRIGGER STOP ORDERS
+  // ========================================================================
+
+  // Check if this trade price triggers any pending stop orders
   check_stop_triggers(trade_price);
+
+  // ========================================================================
+  //  VERBOSE LOGGING (OPTIONAL - FOR DEBUGGING)
+  // ========================================================================
+
+#ifdef DEBUG
+  std::cout << "✓ FILL: Order " << buy_id << " (Acct " << buy_account << ") "
+            << "bought " << trade_qty << " @ $" << std::fixed
+            << std::setprecision(2) << trade_price << " from Order " << sell_id
+            << " (Acct " << sell_account << ")" << std::endl;
+#endif
+  return true;
 }
 
 void OrderBook::update_order_state(Order &order) {
@@ -252,7 +326,17 @@ void OrderBook::match_buy_order(Order &buy_order) {
     }
 
     // Execute trade
-    execute_trade(buy_order, best_ask);
+    bool traded = execute_trade(buy_order, best_ask);
+    if (!traded) {
+      // Reinsert passive order if it remains active
+      auto passive_it = active_orders_.find(best_ask.id);
+      if (passive_it != active_orders_.end() &&
+          passive_it->second.state != OrderState::CANCELLED &&
+          passive_it->second.remaining_qty > 0) {
+        asks_.push(passive_it->second);
+      }
+      break;
+    }
 
     // Update states in active_orders_
     update_order_state(buy_order);
@@ -310,7 +394,16 @@ void OrderBook::match_sell_order(Order &sell_order) {
     }
 
     // Execute trade
-    execute_trade(sell_order, best_bid);
+    bool traded = execute_trade(sell_order, best_bid);
+    if (!traded) {
+      auto passive_it = active_orders_.find(best_bid.id);
+      if (passive_it != active_orders_.end() &&
+          passive_it->second.state != OrderState::CANCELLED &&
+          passive_it->second.remaining_qty > 0) {
+        bids_.push(passive_it->second);
+      }
+      break;
+    }
 
     // Update states
     update_order_state(sell_order);

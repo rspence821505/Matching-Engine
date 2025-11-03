@@ -28,6 +28,7 @@ public:
   TradingSimulator();
 
   // Setup
+  void setup();
   void add_strategy(std::unique_ptr<Strategy> strategy);
   void create_account(int account_id, const std::string &name,
                       double initial_cash);
