@@ -24,6 +24,7 @@ set(TEST_SOURCES
     test_performance_benchmarks.cpp
     test_fill_router.cpp
     test_market_data_generator.cpp
+    test_throughput_benchmark.cpp
 )
 
 add_executable(run_tests ${TEST_SOURCES}
