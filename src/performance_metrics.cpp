@@ -12,11 +12,7 @@ void PerformanceMetrics::calculate(const std::vector<Account> &accounts) {
   sharpe_ratio = 0.0;
   max_drawdown = 0.0;
 
-  if (accounts.empty()) {
-    return;
-  }
-
-  // Aggregate basic statistics across all accounts
+  // Aggregate basic statistics across all accounts (if provided)
   int total_wins = 0;
   int total_losses = 0;
 
@@ -26,6 +22,7 @@ void PerformanceMetrics::calculate(const std::vector<Account> &accounts) {
     total_wins += account.winning_trades;
     total_losses += account.losing_trades;
   }
+  (void)total_losses;
 
   // Calculate win rate
   if (total_trades > 0) {

@@ -59,6 +59,7 @@ set(LIBRARY_SOURCES
     src/strategy.cpp
     src/strategies.cpp
     src/trading_simulator.cpp
+    src/fill_router.cpp
     src/market_data_generator.cpp
 )
 
@@ -143,13 +144,11 @@ endif()
 # Install executables
 install(TARGETS matching_engine 
     RUNTIME DESTINATION bin
-    COMPONENT runtime
 )
 
 if(BUILD_DEMOS)
     install(TARGETS simulator_demo
         RUNTIME DESTINATION bin
-        COMPONENT demos
     )
 endif()
 
@@ -157,14 +156,12 @@ endif()
 install(TARGETS matching_engine_lib
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
-    COMPONENT libraries
 )
 
 # Install headers (optional - for external projects)
 install(DIRECTORY include/
     DESTINATION include/matching_engine
     FILES_MATCHING PATTERN "*.hpp"
-    COMPONENT development
 )
 
 # ==============================================================================

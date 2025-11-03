@@ -22,6 +22,8 @@ set(TEST_SOURCES
     test_account.cpp
     test_position_manager.cpp
     test_performance_benchmarks.cpp
+    test_fill_router.cpp
+    test_market_data_generator.cpp
 )
 
 add_executable(run_tests ${TEST_SOURCES}
@@ -40,6 +42,7 @@ add_executable(run_tests ${TEST_SOURCES}
     ${PROJECT_SOURCE_DIR}/src/account.cpp
     ${PROJECT_SOURCE_DIR}/src/position_manager.cpp
     ${PROJECT_SOURCE_DIR}/src/market_data_generator.cpp
+    ${PROJECT_SOURCE_DIR}/src/fill_router.cpp
 )
 target_compile_definitions(run_tests PRIVATE PERF_TEST_GTEST)
 

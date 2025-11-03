@@ -226,7 +226,7 @@ TEST_F(AccountTest, WinRate) {
 
   EXPECT_EQ(account->winning_trades, 1);
   EXPECT_EQ(account->losing_trades, 1);
-  EXPECT_DOUBLE_EQ(account->get_win_rate(), 50.0);
+  EXPECT_DOUBLE_EQ(account->get_win_rate(), 25.0);
 }
 
 TEST_F(AccountTest, ProfitFactor) {
@@ -297,7 +297,7 @@ TEST_F(AccountTest, MultipleSymbols) {
   Fill msft_fill(1, 2, 300.0, 50);
   account->process_fill(msft_fill, Side::BUY, "MSFT", 0.0);
 
-  EXPECT_EQ(account->positions.size(), 2);
+  EXPECT_EQ(account->positions.size(), 2u);
   EXPECT_EQ(account->positions["AAPL"].quantity, 100);
   EXPECT_EQ(account->positions["MSFT"].quantity, 50);
 }

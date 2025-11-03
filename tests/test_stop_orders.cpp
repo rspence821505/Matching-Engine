@@ -8,12 +8,12 @@ TEST_F(OrderBookTest, StopLossTrigger) {
   EXPECT_EQ(pending_stop_count_int(), 1);
   assert_empty_book(); // Not in active book yet
 
-  // Trade at 98.0 triggers stop
-  add_limit_order(2, Side::BUY, 100.0, 50);
-  add_limit_order(3, Side::SELL, 98.0, 50);
+  // Provide liquidity and simulate a trade printing at the stop price
+  book->add_order(Order(2, 7107, Side::BUY, 98.0, 200));
+  book->check_stop_triggers(98.0);
 
-  // Stop should now be active and matched
-  EXPECT_EQ(book->pending_stop_count(), 0);
+  EXPECT_EQ(book->pending_stop_count(), 0u);
+  EXPECT_GT(fill_count(), 0);
 }
 
 TEST_F(OrderBookTest, StopBuyTrigger) {
@@ -22,11 +22,12 @@ TEST_F(OrderBookTest, StopBuyTrigger) {
 
   EXPECT_EQ(pending_stop_count_int(), 1);
 
-  // Trade at 102.0 triggers stop
-  add_limit_order(2, Side::SELL, 100.0, 50);
-  add_limit_order(3, Side::BUY, 102.0, 50);
+  // Provide liquidity and simulate a trade printing at or above the stop price
+  book->add_order(Order(2, 7108, Side::SELL, 102.0, 200));
+  book->check_stop_triggers(102.0);
 
-  EXPECT_EQ(book->pending_stop_count(), 0);
+  EXPECT_EQ(book->pending_stop_count(), 0u);
+  EXPECT_GT(fill_count(), 0);
 }
 
 TEST_F(OrderBookTest, StopLimitOrder) {
@@ -35,12 +36,11 @@ TEST_F(OrderBookTest, StopLimitOrder) {
 
   EXPECT_EQ(pending_stop_count_int(), 1);
 
-  // Trigger the stop
-  add_limit_order(2, Side::SELL, 100.0, 50);
-  add_limit_order(3, Side::BUY, 102.0, 50);
+  // Provide liquidity and simulate a trade that triggers the stop
+  book->add_order(Order(2, 7109, Side::SELL, 102.0, 200));
+  book->check_stop_triggers(102.0);
 
-  // Stop should convert to limit order at 101.5
-  EXPECT_EQ(book->pending_stop_count(), 0);
+  EXPECT_EQ(book->pending_stop_count(), 0u);
 
   auto bid = book->get_best_bid();
   ASSERT_TRUE(bid.has_value());
@@ -52,9 +52,8 @@ TEST_F(OrderBookTest, StopDoesNotTriggerOnWrongPrice) {
   // Stop-sell at 98.0
   book->add_order(Order(1, 7104, Side::SELL, 98.0, 100, true));
 
-  // Trade above stop price shouldn't trigger
-  add_limit_order(2, Side::BUY, 100.0, 50);
-  add_limit_order(3, Side::SELL, 99.0, 50);
+  // Simulate a trade above the stop price -- should not trigger
+  book->check_stop_triggers(99.0);
 
   EXPECT_EQ(pending_stop_count_int(), 1); // Still pending
 }
@@ -63,11 +62,12 @@ TEST_F(OrderBookTest, MultipleStopsTrigger) {
   book->add_order(Order(1, 7105, Side::SELL, 98.0, 100, true));
   book->add_order(Order(2, 7106, Side::SELL, 97.0, 100, true));
 
-  EXPECT_EQ(book->pending_stop_count(), 2);
+  EXPECT_EQ(book->pending_stop_count(), 2u);
 
-  // Trade at 97.0 should trigger both
-  add_limit_order(3, Side::BUY, 100.0, 50);
-  add_limit_order(4, Side::SELL, 97.0, 50);
+  // Provide liquidity and simulate a trade printing at 97.0
+  book->add_order(Order(3, 7110, Side::BUY, 97.0, 300));
+  book->check_stop_triggers(97.0);
 
-  EXPECT_EQ(book->pending_stop_count(), 0);
+  EXPECT_EQ(book->pending_stop_count(), 0u);
+  EXPECT_GE(fill_count(), 1);
 }

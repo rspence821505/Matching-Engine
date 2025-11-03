@@ -31,17 +31,14 @@ TEST_F(OrderBookTest, ComplexMultiLevelMatching) {
 }
 
 TEST_F(OrderBookTest, SelfTradePrevention) {
-  // This test documents current behavior - real exchanges prevent self-trades
-  // Current implementation ALLOWS self-trades (buyer and seller same ID)
+  Order buy(100, 6001, Side::BUY, 100.0, 100);
+  Order sell(101, 6001, Side::SELL, 100.0, 100);
 
-  add_limit_order(1, Side::BUY, 100.0, 100);
-  add_limit_order(1, Side::SELL, 100.0, 100); // Same ID
+  book->add_order(buy);
+  book->add_order(sell);
 
-  // Current behavior: allows self-trade
-  EXPECT_EQ(fill_count(), 1);
-
-  // TODO: Implement self-trade prevention in production
-  // Should either reject second order or cancel both
+  EXPECT_EQ(fill_count(), 0);
+  EXPECT_ORDER_STATE(101, OrderState::CANCELLED);
 }
 
 TEST_F(OrderBookTest, MarketDepthCalculation) {
@@ -54,8 +51,8 @@ TEST_F(OrderBookTest, MarketDepthCalculation) {
   add_limit_order(6, Side::SELL, 102.0, 200);
 
   // Verify total depth
-  EXPECT_EQ(book->bids_size(), 3);
-  EXPECT_EQ(book->asks_size(), 3);
+  EXPECT_EQ(book->bids_size(), 3u);
+  EXPECT_EQ(book->asks_size(), 3u);
 
   // Verify spread
   auto spread = book->get_spread();
@@ -136,7 +133,7 @@ TEST_F(OrderBookTest, MassiveCancellationStorm) {
     add_limit_order(i, Side::BUY, 100.0, 10);
   }
 
-  EXPECT_EQ(book->bids_size(), 100);
+  EXPECT_EQ(book->bids_size(), 100u);
 
   // Cancel all orders
   for (int i = 0; i < 100; ++i) {
@@ -358,11 +355,15 @@ TEST_F(OrderBookTest, IcebergMeetsStopOrder) {
   // Stop order set below current price
   book->add_order(Order(2, 6002, Side::SELL, 98.0, 100, true));
 
-  // Trade that triggers stop
-  add_limit_order(3, Side::BUY, 98.0, 50);
+  // Provide liquidity on the buy side so the stop has a counterparty
+  book->add_order(Order(10, 6005, Side::BUY, 98.0, 200));
 
-  // Stop should activate and potentially match with remaining iceberg
-  EXPECT_EQ(book->pending_stop_count(), 0);
+  // Simulate a trade printing at 98.0
+  book->check_stop_triggers(98.0);
+
+  // Stop should activate and be removed from the pending list
+  EXPECT_EQ(book->pending_stop_count(), 0u);
+  EXPECT_GT(fill_count(), 0);
 }
 
 TEST_F(OrderBookTest, MarketOrderWithIOC) {

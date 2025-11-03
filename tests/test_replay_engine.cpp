@@ -12,6 +12,8 @@ protected:
   void SetUp() override {
     book = std::make_unique<OrderBook>();
     replay = std::make_unique<ReplayEngine>();
+    book->enable_self_trade_prevention(false);
+    replay->get_book_mutable().enable_self_trade_prevention(false);
   }
 
   void TearDown() override { std::filesystem::remove(events_file); }
@@ -60,10 +62,10 @@ TEST_F(ReplayTest, ReplayManualControl) {
   EXPECT_EQ(static_cast<int>(replay->get_current_index()), 0);
 
   replay->replay_next_event();
-  EXPECT_EQ(replay->get_current_index(), 1);
+  EXPECT_EQ(static_cast<int>(replay->get_current_index()), 1);
 
   replay->replay_next_event();
-  EXPECT_EQ(replay->get_current_index(), 2);
+  EXPECT_EQ(static_cast<int>(replay->get_current_index()), 2);
 }
 
 TEST_F(ReplayTest, ReplayValidation) {

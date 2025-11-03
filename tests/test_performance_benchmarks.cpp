@@ -371,7 +371,7 @@ PERF_TEST(realistic_trading_scenario) {
     pnl += 1500.0; // Uptrend
 
     // Add occasional drawdowns
-    if (i % 20 == 0) {
+    if (i > 0 && i % 20 == 0) {
       pnl -= 15000.0; // Periodic drawdown
     }
 

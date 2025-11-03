@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 std::string OrderEvent::to_string() const {
   std::ostringstream oss;
@@ -28,7 +29,8 @@ std::string OrderEvent::to_string() const {
 
 std::string OrderEvent::csv_header() {
   return "timestamp,type,order_id,side,order-type,tif,price,quantity,peak_size,"
-         "has_new_price,has_new_qty,new_price,new_qty,counterparty,fill_qty";
+         "account_id,has_new_price,has_new_qty,new_price,new_qty,counterparty,"
+         "fill_qty";
 }
 
 std::string OrderEvent::to_csv() const {
@@ -73,9 +75,9 @@ std::string OrderEvent::to_csv() const {
   }
   oss << ",";
 
-  // Price, quantity, peak_size
+  // Price, quantity, peak_size, account id
   oss << std::fixed << std::setprecision(2) << price << "," << quantity << ","
-      << peak_size << ",";
+      << peak_size << "," << account_id << ",";
 
   // Amendment fields
   oss << (has_new_price ? "1" : "0") << "," << (has_new_quantity ? "1" : "0")
@@ -97,10 +99,10 @@ OrderEvent OrderEvent::from_csv(const std::string &line) {
     tokens.push_back(token);
   }
 
-  if (tokens.size() < 15) {
+  if (tokens.size() < 16) {
     // ADD DEBUG OUTPUT HERE
     std::cerr << "Invalid CSV line (got " << tokens.size()
-              << " fields, expected 15+):" << std::endl;
+              << " fields, expected 16+):" << std::endl;
     std::cerr << "Line: " << line << std::endl;
     std::cerr << "Tokens parsed: ";
     for (size_t i = 0; i < tokens.size(); ++i) {
@@ -137,28 +139,33 @@ OrderEvent OrderEvent::from_csv(const std::string &line) {
     double price = std::stod(tokens[6]);
     int quantity = std::stoi(tokens[7]);
     int peak_size = std::stoi(tokens[8]);
+    int account_id = std::stoi(tokens[9]);
 
-    OrderEvent event(ts, order_id, side, ot, tif, price, quantity, peak_size);
+    OrderEvent event(ts, order_id, side, ot, tif, price, quantity, peak_size,
+                     account_id);
     return event;
   } else if (type == EventType::CANCEL_ORDER) {
-    return OrderEvent(ts, type, order_id);
+    int account_id = std::stoi(tokens[9]);
+    return OrderEvent(ts, type, order_id, account_id);
   } else if (type == EventType::AMEND_ORDER) {
-    bool has_new_price = (tokens[9] == "1");
-    bool has_new_qty = (tokens[10] == "1");
+    int account_id = std::stoi(tokens[9]);
+    bool has_new_price = (tokens[10] == "1");
+    bool has_new_qty = (tokens[11] == "1");
 
     std::optional<double> new_price;
     std::optional<int> new_qty;
 
     if (has_new_price)
-      new_price = std::stod(tokens[11]);
+      new_price = std::stod(tokens[12]);
     if (has_new_qty)
-      new_qty = std::stoi(tokens[12]);
+      new_qty = std::stoi(tokens[13]);
 
-    return OrderEvent(ts, order_id, new_price, new_qty);
+    return OrderEvent(ts, order_id, new_price, new_qty, account_id);
   } else { // FILL
-    int counterparty = std::stoi(tokens[13]);
+    int account_id = std::stoi(tokens[9]);
+    int counterparty = std::stoi(tokens[14]);
     double price = std::stod(tokens[6]);
-    int qty = std::stoi(tokens[14]);
-    return OrderEvent(ts, order_id, counterparty, price, qty);
+    int qty = std::stoi(tokens[15]);
+    return OrderEvent(ts, order_id, counterparty, price, qty, account_id);
   }
 }

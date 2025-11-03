@@ -52,7 +52,7 @@ protected:
   }
 
   // Helper: Count total fills
-  size_t fill_count() const { return book->get_fills().size(); }
+  int fill_count() const { return static_cast<int>(book->get_fills().size()); }
 
   // Helper: Get best bid price
   std::optional<double> best_bid_price() const {
