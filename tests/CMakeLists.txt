@@ -39,6 +39,7 @@ add_executable(run_tests ${TEST_SOURCES}
     ${PROJECT_SOURCE_DIR}/src/replay_engine.cpp
     ${PROJECT_SOURCE_DIR}/src/account.cpp
     ${PROJECT_SOURCE_DIR}/src/position_manager.cpp
+    ${PROJECT_SOURCE_DIR}/src/market_data_generator.cpp
 )
 target_compile_definitions(run_tests PRIVATE PERF_TEST_GTEST)
 

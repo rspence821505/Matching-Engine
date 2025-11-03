@@ -1,11 +1,9 @@
-#include "order.hpp"
+#include "market_data_generator.hpp"
 #include "order_book.hpp"
-#include "fill_router.hpp"
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
-#include <string>
-#include <vector>
 
 namespace {
 std::string liquidity_flag_to_string(EnhancedFill::LiquidityFlag flag) {
@@ -23,27 +21,25 @@ std::string liquidity_flag_to_string(EnhancedFill::LiquidityFlag flag) {
 
 int main() {
   std::cout << "╔════════════════════════════════════════════════════════╗\n"
-            << "║      Enhanced Fill Router Demonstration (C++17)       ║\n"
+            << "║   Market Data Generator & Fill Router Demonstration    ║\n"
             << "╚════════════════════════════════════════════════════════╝\n"
             << std::endl;
 
-  OrderBook book("FILL_ROUTER_DEMO");
+  OrderBook book("SIMGEN");
   FillRouter &router = book.get_fill_router();
 
-  // Configure router behaviour
   router.set_self_trade_prevention(true);
   router.set_fee_schedule(/*maker*/ 0.0001, /*taker*/ 0.0003);
 
-  // Register callbacks so we can watch fills and self-trade handling live
   router.register_fill_callback([](const EnhancedFill &fill) {
     std::cout << std::fixed << std::setprecision(2);
     std::cout << "  • Fill #" << fill.fill_id << " "
               << fill.base_fill.quantity << " @ $" << fill.base_fill.price
-              << "  |  BuyAcct=" << fill.buy_account_id
-              << "  SellAcct=" << fill.sell_account_id
-              << "  Liquidity=" << liquidity_flag_to_string(fill.liquidity_flag)
+              << " | BuyAcct=" << fill.buy_account_id
+              << " SellAcct=" << fill.sell_account_id
+              << " Liquidity=" << liquidity_flag_to_string(fill.liquidity_flag)
               << "\n"
-              << "    Fees  (buyer=" << fill.buyer_fee
+              << "    Fees (buyer=" << fill.buyer_fee
               << ", seller=" << fill.seller_fee << ")\n";
   });
 
@@ -54,29 +50,46 @@ int main() {
                   << "\n";
       });
 
-  auto submit_limit_order = [&](int id, int account, Side side, double price,
-                                int quantity) {
-    Order order(id, account, side, price, quantity);
-    book.add_order(order);
-  };
+  MarketDataGenerator::Config cfg;
+  cfg.symbol = "SIMGEN";
+  cfg.start_price = 100.0;
+  cfg.depth_levels = 3;
+  cfg.volatility = 0.65;
+  cfg.spread = 0.04;
 
-  std::cout << "\n--- Scenario 1: Standard maker/taker match ---\n";
-  submit_limit_order(1, 1001, Side::SELL, 101.50, 100); // Maker posts ask
-  submit_limit_order(2, 2002, Side::BUY, 101.50, 100);  // Aggressive buyer hits
+  MarketDataGenerator generator(cfg);
+  generator.register_callback([](const MarketDataSnapshot &snapshot) {
+    std::cout << "  ≈ Snapshot " << snapshot.symbol
+              << " | Mid=" << std::fixed << std::setprecision(2)
+              << snapshot.last_price << " Bid=" << snapshot.bid_price
+              << " Ask=" << snapshot.ask_price
+              << " Spread=" << snapshot.spread << std::endl;
+  });
 
-  std::cout << "\n--- Scenario 2: Self-trade prevention in action ---\n";
-  submit_limit_order(3, 3003, Side::SELL, 101.25, 50);
-  submit_limit_order(4, 3003, Side::BUY, 101.25, 50); // Same account → blocked
-  book.cancel_order(3);
-  book.cancel_order(4);
+  std::cout << "\n--- Phase 1: Seeding order book with synthetic liquidity ---\n";
+  for (int i = 0; i < 6; ++i) {
+    generator.step(&book, 0.35);
+  }
 
-  std::cout << "\n--- Scenario 3: Self-trade allowed (prevention disabled) ---\n";
+  book.print_top_of_book();
+
+  std::cout << "\n--- Phase 2: Self-trade prevention (enabled) ---\n";
+  router.set_self_trade_prevention(true);
+  generator.inject_self_trade(
+      book, cfg.maker_buy_account,
+      std::max(generator.current_mid(), cfg.tick_size), 75);
+
+  std::cout << "\nRouter statistics after prevention:\n";
+  router.print_statistics();
+
+  std::cout << "\n--- Phase 3: Self-trade allowed (prevention disabled) ---\n";
   router.set_self_trade_prevention(false);
-  submit_limit_order(5, 3003, Side::SELL, 101.10, 50);
-  submit_limit_order(6, 3003, Side::BUY, 101.10, 50);
+  generator.inject_self_trade(
+      book, cfg.maker_buy_account + 1,
+      std::max(generator.current_mid(), cfg.tick_size), 60);
+  generator.step(&book, 0.5);
 
-  // Summaries ----------------------------------------------------------------
-  std::cout << "\n";
+  std::cout << "\nFinal router statistics:\n";
   router.print_statistics();
 
   const auto &enhanced_fills = router.get_all_fills();
@@ -91,11 +104,12 @@ int main() {
               << "\n";
   }
 
-  std::cout << "\nAccount 3003 participation: "
-            << router.get_fills_for_account(3003).size() << " fills\n";
-  std::cout << "Symbol FILL_ROUTER_DEMO fills: "
-            << router.get_fills_for_symbol("FILL_ROUTER_DEMO").size()
+  std::cout << "\nAccount " << cfg.maker_buy_account
+            << " participation: "
+            << router.get_fills_for_account(cfg.maker_buy_account).size()
             << " fills\n";
+  std::cout << "Symbol " << cfg.symbol << " fills: "
+            << router.get_fills_for_symbol(cfg.symbol).size() << " fills\n";
 
   if (!enhanced_fills.empty()) {
     uint64_t first_id = enhanced_fills.front().fill_id;
@@ -109,7 +123,8 @@ int main() {
     }
   }
 
-  std::cout << "\nDemo complete. The enhanced fill router is configured and "
-               "functioning.\n";
+  std::cout << "\nDemo complete. The market data generator and fill router are "
+               "ready for testing workflows.\n";
   return 0;
 }
+

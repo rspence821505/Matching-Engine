@@ -59,6 +59,7 @@ set(LIBRARY_SOURCES
     src/strategy.cpp
     src/strategies.cpp
     src/trading_simulator.cpp
+    src/market_data_generator.cpp
 )
 
 # Main application source
