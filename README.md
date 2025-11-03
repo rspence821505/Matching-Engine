@@ -1,4 +1,4 @@
-# High-Performance Matching Engine ![C++](https://img.shields.io/badge/C++-17-blue.svg) ![License](https://img.shields.io/badge/license-MIT-green.svg) ![Optimization](https://img.shields.io/badge/optimization-O3-orange.svg)
+# High-Performance Matching Engine
 
 A production-grade limit-order book written in modern C++17. The engine delivers sub-microsecond latency, supports advanced order types, and includes full persistence, replay, and analytics tooling for realistic trading simulations.
 
