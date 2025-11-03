@@ -1,0 +1,27 @@
+Multi-Account Summary
+=====================
+
+Account: Market Maker (ID: 1003)
+  Cash: $2000000.00
+  Value: $2000000.00
+  P&L: $0.00
+  Trades: 0
+
+Account: Mean Reversion Trader (ID: 1002)
+  Cash: $1000000.00
+  Value: $1000000.00
+  P&L: $0.00
+  Trades: 0
+
+Account: Momentum Trader (ID: 1001)
+  Cash: $1000000.00
+  Value: $1000000.00
+  P&L: $0.00
+  Trades: 0
+
+Aggregate Statistics
+====================
+Total Accounts: 3
+Total Value: $4000000.00
+Total P&L: $0.00
+Total Trades: 0

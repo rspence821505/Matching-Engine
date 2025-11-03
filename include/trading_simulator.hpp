@@ -22,6 +22,8 @@ private:
   int next_order_id_;
   bool is_running_;
 
+  void process_fills();
+
 public:
   TradingSimulator();
 
